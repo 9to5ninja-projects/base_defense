@@ -8,10 +8,13 @@ from src.core_data import GameState, BuildingType, get_building_template, Enemy,
 FPS = 60
 
 # Layout Constants
-GRID_WIDTH = GRID_SLOT_WIDTH * 16 # Max columns
-UI_START_X = GRID_START_X + (GRID_SLOT_WIDTH * 8) + 20 # Start UI after unlocked columns initially, or just fixed
-UI_START_X = 800 # Fixed right side
-UI_WIDTH = SCREEN_WIDTH - UI_START_X - 20
+GRID_SLOT_WIDTH = 60
+MAX_COLS = 16
+GRID_WIDTH = GRID_SLOT_WIDTH * MAX_COLS
+UI_WIDTH = 300
+PLAYABLE_WIDTH = SCREEN_WIDTH - UI_WIDTH
+GRID_START_X = (PLAYABLE_WIDTH - GRID_WIDTH) // 2
+UI_START_X = PLAYABLE_WIDTH
 
 # Colors
 BLACK = (0, 0, 0)
@@ -38,9 +41,13 @@ class Game:
             self.state.grid = CityGrid()
             
         self.show_menu = False
+        self.messages = [] # List of (text, color, timer)
         
         self.font = pygame.font.Font(None, 24)
         self.font_large = pygame.font.Font(None, 36)
+        
+    def add_message(self, text, color=WHITE, duration=3.0):
+        self.messages.append({'text': text, 'color': color, 'timer': duration})
     
     def handle_input(self):
         for event in pygame.event.get():
@@ -55,7 +62,7 @@ class Game:
         if key == pygame.K_LEFT:
             self.state.selected_column = max(0, self.state.selected_column - 1)
         elif key == pygame.K_RIGHT:
-            self.state.selected_column = min(self.state.grid.unlocked_columns - 1, self.state.selected_column + 1)
+            self.state.selected_column = min(self.state.grid.max_columns - 1, self.state.selected_column + 1)
         elif key == pygame.K_UP:
             self.state.selected_row = min(self.state.grid.rows - 1, self.state.selected_row + 1)
         elif key == pygame.K_DOWN:
@@ -92,17 +99,20 @@ class Game:
         # Check if can place
         can_place, reason = self.state.grid.can_place(building_type, col, row)
         if not can_place:
+            self.add_message(f"Cannot place: {reason}", RED)
             print(f"Cannot place: {reason}")
             return False
         
         template = get_building_template(building_type, 1)
         if self.state.credits < template.cost:
+            self.add_message("Not enough credits", RED)
             print("Not enough credits")
             return False
         
         self.state.credits -= template.cost
         self.state.grid.place_building(building_type, col, row)
         self.state.update_economy()
+        self.add_message(f"Built {building_type.value}", GREEN)
         return True
 
     def try_upgrade(self):
@@ -112,38 +122,55 @@ class Game:
             return
             
         if not building.can_upgrade():
+            self.add_message("Cannot upgrade (max level)", RED)
             print("Cannot upgrade (max level or not upgradable)")
             return
             
         if self.state.credits < building.template.upgrade_cost:
+            self.add_message("Not enough credits", RED)
             print("Not enough credits for upgrade")
             return
             
         if self.state.grid.upgrade_building(building.id):
             self.state.credits -= building.template.upgrade_cost
             self.state.update_economy()
+            self.add_message(f"Upgraded to Level {building.template.level}", GREEN)
             print(f"Upgraded to Level {building.template.level}")
         else:
+            self.add_message("Upgrade failed (space blocked?)", RED)
             print("Upgrade failed (space blocked?)")
 
     def try_destroy(self):
         """Destroy building at selected position"""
         building = self.state.grid.get_building_at(self.state.selected_column, self.state.selected_row)
         if building:
+            # Refund 50%
+            refund = int(building.template.cost * 0.5)
+            self.state.credits += refund
             self.state.grid.destroy_building(building.id)
             self.state.update_economy()
+            self.add_message(f"Destroyed {building.template.type.value}. Refund: ${refund}", YELLOW)
     
     def start_wave(self):
         if self.state.energy_surplus < 0:
+            self.add_message("Cannot start wave: Negative Energy!", RED)
+            self.add_message("Build Power Plants or Destroy Consumers.", RED)
             print("Cannot start wave: negative energy!")
             return
         self.state.phase = "combat"
         self.state.wave += 1
         self.state.combat.start_wave()
+        self.add_message(f"Wave {self.state.wave} Started!", RED)
     
     def update(self, dt):
+        prev_phase = self.state.phase
+        
         if self.state.phase == "combat":
             self.state.combat.update(dt)
+        
+        # Detect phase change to build
+        if prev_phase == "combat" and self.state.phase == "build":
+            self.add_message("Wave Complete!", GREEN)
             
         # Shield recharge (always active)
         if self.state.shield_current_hp < self.state.shield_max_hp and self.state.energy_surplus >= 0:
@@ -152,6 +179,11 @@ class Game:
                 self.state.shield_max_hp,
                 self.state.shield_current_hp + recharge
             )
+        
+        # Update messages
+        for msg in self.messages:
+            msg['timer'] -= dt
+        self.messages = [m for m in self.messages if m['timer'] > 0]
         
         # Check loss condition
         if not self.state.grid.buildings and self.state.wave > 0 and self.state.phase == "combat":  # No buildings left
@@ -171,6 +203,7 @@ class Game:
             self.draw_projectiles()
         
         self.draw_hud()
+        self.draw_messages()
         
         if self.show_menu and self.state.phase == "build":
             self.draw_build_menu()
@@ -270,6 +303,8 @@ class Game:
             y += 20
             self.screen.blit(self.font.render("Arrows: Move Cursor", True, WHITE), (x, y))
             y += 20
+            self.screen.blit(self.font.render("Space: Build Menu", True, WHITE), (x, y))
+            y += 20
             self.screen.blit(self.font.render("1-5: Place Building", True, WHITE), (x, y))
             y += 20
             self.screen.blit(self.font.render("U: Upgrade | Del: Destroy", True, WHITE), (x, y))
@@ -308,7 +343,7 @@ class Game:
         menu_width = 350
         menu_height = 450
         # Center over the grid area
-        grid_center_x = GRID_START_X + (self.state.grid.unlocked_columns * GRID_SLOT_WIDTH // 2)
+        grid_center_x = GRID_START_X + (self.state.grid.max_columns * GRID_SLOT_WIDTH // 2)
         menu_x = grid_center_x - (menu_width // 2)
         menu_y = (SCREEN_HEIGHT - menu_height) // 2
         
@@ -351,7 +386,7 @@ class Game:
     
     def draw_grid(self):
         """Draw the city grid"""
-        cols = self.state.grid.unlocked_columns
+        cols = self.state.grid.max_columns
         rows = self.state.grid.rows
         
         # Draw vertical lines
@@ -364,15 +399,38 @@ class Game:
             y = GROUND_Y - j * GRID_CELL_HEIGHT
             pygame.draw.line(self.screen, DARK_GRAY, (GRID_START_X, y), (GRID_START_X + cols * GRID_SLOT_WIDTH, y), 1)
             
-        # Ground line
+        # Ground line (full width)
         pygame.draw.line(self.screen, GRAY, 
                         (GRID_START_X, GROUND_Y), 
                         (GRID_START_X + cols * GRID_SLOT_WIDTH, GROUND_Y), 3)
+        
+        # Highlight unlocked area
+        start, end = self.state.grid.unlocked_range
+        unlocked_x = GRID_START_X + start * GRID_SLOT_WIDTH
+        unlocked_width = (end - start) * GRID_SLOT_WIDTH
+        
+        # Draw brighter ground for unlocked area
+        pygame.draw.line(self.screen, WHITE, 
+                        (unlocked_x, GROUND_Y), 
+                        (unlocked_x + unlocked_width, GROUND_Y), 3)
+        
+        # Draw faint background for unlocked area
+        s = pygame.Surface((unlocked_width, rows * GRID_CELL_HEIGHT))
+        s.set_alpha(30)
+        s.fill(WHITE)
+        self.screen.blit(s, (unlocked_x, GROUND_Y - rows * GRID_CELL_HEIGHT))
             
         # Selection highlight
         sel_x = GRID_START_X + self.state.selected_column * GRID_SLOT_WIDTH
         sel_y = GROUND_Y - (self.state.selected_row + 1) * GRID_CELL_HEIGHT
-        pygame.draw.rect(self.screen, YELLOW, 
+        
+        # Color based on unlocked status
+        if self.state.grid.is_unlocked(self.state.selected_column):
+            color = YELLOW
+        else:
+            color = RED
+            
+        pygame.draw.rect(self.screen, color, 
                        (sel_x, sel_y, GRID_SLOT_WIDTH, GRID_CELL_HEIGHT), 2)
     
     def draw_buildings(self):
@@ -422,7 +480,7 @@ class Game:
         thickness = max(2, min(50, int(self.state.shield_current_hp / 5)))
         
         # Draw the shield
-        cols = self.state.grid.unlocked_columns
+        cols = self.state.grid.max_columns
         pygame.draw.line(self.screen, (0, 200, 255), 
                         (GRID_START_X, SHIELD_Y), 
                         (GRID_START_X + cols * GRID_SLOT_WIDTH, SHIELD_Y), thickness)
@@ -431,6 +489,24 @@ class Game:
         shield_text = f"Shield: {int(self.state.shield_current_hp)}/{self.state.shield_max_hp}"
         text_surf = self.font.render(shield_text, True, WHITE)
         self.screen.blit(text_surf, (GRID_START_X, SHIELD_Y - 30))
+    
+    def draw_messages(self):
+        """Draw floating messages"""
+        y = 100
+        for msg in self.messages:
+            text_surf = self.font_large.render(msg['text'], True, msg['color'])
+            # Center text
+            rect = text_surf.get_rect(center=(SCREEN_WIDTH // 2, y))
+            
+            # Draw background for readability
+            bg_rect = rect.inflate(20, 10)
+            s = pygame.Surface((bg_rect.width, bg_rect.height))
+            s.set_alpha(200)
+            s.fill(BLACK)
+            self.screen.blit(s, bg_rect)
+            
+            self.screen.blit(text_surf, rect)
+            y += 40
     
     def run(self):
         while self.running:

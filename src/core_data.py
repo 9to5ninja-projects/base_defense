@@ -143,11 +143,21 @@ class Building:
 
 class CityGrid:
     def __init__(self, unlocked_columns: int = 8, max_columns: int = 16):
-        self.unlocked_columns = unlocked_columns
+        self.unlocked_count = unlocked_columns
         self.max_columns = max_columns
         self.rows = 12
         self.buildings: List[Building] = []
         self.next_building_id = 0
+        
+    @property
+    def unlocked_range(self) -> Tuple[int, int]:
+        """Returns start (inclusive) and end (exclusive) indices of unlocked columns"""
+        start = (self.max_columns - self.unlocked_count) // 2
+        return start, start + self.unlocked_count
+
+    def is_unlocked(self, column: int) -> bool:
+        start, end = self.unlocked_range
+        return start <= column < end
         
     def get_occupied_cells(self) -> Set[Tuple[int, int]]:
         """Get all cells occupied by buildings"""
@@ -175,14 +185,14 @@ class CityGrid:
         """Check if building can be placed at position"""
         
         # Check column unlocked
-        if column >= self.unlocked_columns:
+        if not self.is_unlocked(column):
             return False, "Column not unlocked"
         
         template = get_building_template(building_type, 1)
         width, height = template.footprint
         
         # Check bounds
-        if column + width > self.unlocked_columns:
+        if column + width > self.unlocked_range[1]:
             return False, "Building too wide for remaining columns"
         if row + height > self.rows:
             return False, "Building too tall"
@@ -202,7 +212,7 @@ class CityGrid:
         if building_type == BuildingType.DATACENTER:
             # Check left and right columns
             left_vacant = column > 0
-            right_vacant = column + width < self.unlocked_columns
+            right_vacant = column + width < self.max_columns
             
             if not (left_vacant or right_vacant):
                 return False, "Datacenter needs vacant neighbor column"
@@ -367,8 +377,8 @@ class CombatManager:
         
     def spawn_enemy(self):
         """Spawn a single enemy at random x position"""
-        cols = self.state.grid.unlocked_columns
-        slot = random.randint(0, cols - 1)
+        start, end = self.state.grid.unlocked_range
+        slot = random.randint(start, end - 1)
         x = GRID_START_X + slot * GRID_SLOT_WIDTH + GRID_SLOT_WIDTH / 2
         
         # Scale HP with wave number
@@ -425,7 +435,7 @@ class CombatManager:
             # Check if enemy reached ground (destroy bottom building)
             if enemy.y >= GROUND_Y:
                 col = int((enemy.x - GRID_START_X) / GRID_SLOT_WIDTH)
-                if 0 <= col < self.state.grid.unlocked_columns:
+                if 0 <= col < self.state.grid.max_columns:
                     building = self.state.grid.get_building_at(col, 0)
                     if building:
                         building.current_hp -= enemy.damage
@@ -543,7 +553,7 @@ class CombatManager:
                 continue
                 
             col = int((enemy.x - GRID_START_X) / GRID_SLOT_WIDTH)
-            if 0 <= col < self.state.grid.unlocked_columns:
+            if 0 <= col < self.state.grid.max_columns:
                 for building in self.state.grid.buildings:
                     width, height = building.template.footprint
                     if building.column <= col < building.column + width:

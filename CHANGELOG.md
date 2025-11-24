@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.1] - 2025-11-24
+
+### Changed
+- **Grid Layout**: 
+  - Centered the grid on the screen.
+  - Expanded internal grid capacity to 16 columns (currently 8 unlocked by default).
+  - Visual improvements to the grid rendering (highlighting unlocked area).
+- **UI/UX**:
+  - Added an in-game **Message Log** system for better player feedback (e.g., "Not enough credits", "Wave Started").
+  - Updated HUD controls text to include missing keys.
+  - Added explicit error messages for the "Negative Energy" wave start prevention.
+- **Bug Fixes**:
+  - Fixed an issue where the game would fail to start a wave silently if energy was negative.
+
 ## [0.2.0] - 2025-11-24
 
 ### Changed
