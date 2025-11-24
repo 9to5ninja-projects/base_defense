@@ -44,7 +44,11 @@ class BuildingTemplate:
                 return (3, 3)
         
         elif self.type in [BuildingType.DATACENTER, BuildingType.CAPACITOR]:
-            # Vertical growth only
+            # Datacenters grow horizontally now (Tier x 1)
+            if self.type == BuildingType.DATACENTER:
+                return (self.tier, 1)
+            # Capacitors still grow vertically? Or should they match?
+            # Keeping Capacitors vertical for now as requested only for Datacenter
             return (1, self.tier)
         
         else:  # Defense buildings
@@ -143,8 +147,11 @@ class Building:
 
 class CityGrid:
     def __init__(self, unlocked_columns: int = 8, max_columns: int = 16):
-        self.unlocked_count = unlocked_columns
         self.max_columns = max_columns
+        self.unlocked_width = unlocked_columns
+        # Start centered
+        self.unlocked_start = (max_columns - unlocked_columns) // 2
+        
         self.rows = 12
         self.buildings: List[Building] = []
         self.next_building_id = 0
@@ -152,12 +159,75 @@ class CityGrid:
     @property
     def unlocked_range(self) -> Tuple[int, int]:
         """Returns start (inclusive) and end (exclusive) indices of unlocked columns"""
-        start = (self.max_columns - self.unlocked_count) // 2
-        return start, start + self.unlocked_count
+        return self.unlocked_start, self.unlocked_start + self.unlocked_width
 
     def is_unlocked(self, column: int) -> bool:
         start, end = self.unlocked_range
         return start <= column < end
+    
+    def can_unlock(self, side: str) -> bool:
+        """Check if we can unlock a column on the given side"""
+        if side == "left":
+            return self.unlocked_start > 0
+        elif side == "right":
+            return (self.unlocked_start + self.unlocked_width) < self.max_columns
+        return False
+
+    def unlock_column(self, side: str) -> bool:
+        """Unlock a column on the specified side"""
+        if not self.can_unlock(side):
+            return False
+            
+        if side == "left":
+            self.unlocked_start -= 1
+            self.unlocked_width += 1
+        elif side == "right":
+            self.unlocked_width += 1
+        return True
+
+    def is_supporting_others(self, building: Building) -> bool:
+        """Check if any building is resting on top of this one"""
+        top_row = building.row + building.template.footprint[1]
+        building_cols = set(range(building.column, building.column + building.template.footprint[0]))
+        
+        for other in self.buildings:
+            if other.id == building.id:
+                continue
+            if other.row == top_row:
+                other_cols = set(range(other.column, other.column + other.template.footprint[0]))
+                if not building_cols.isdisjoint(other_cols):
+                    return True
+        return False
+
+    def move_building(self, building_id: int, new_col: int, new_row: int) -> Tuple[bool, str]:
+        """Try to move an existing building to a new location"""
+        building = next((b for b in self.buildings if b.id == building_id), None)
+        if not building:
+            return False, "Building not found"
+            
+        # Check if supporting anything
+        if self.is_supporting_others(building):
+             return False, "Cannot move: Supporting other buildings"
+
+        # Store old pos
+        old_col, old_row = building.column, building.row
+        
+        # Temporarily remove building to check placement
+        self.buildings.remove(building)
+        
+        # Check if valid at new pos
+        can_place, reason = self.can_place(building.template.type, new_col, new_row, level=building.template.level)
+        
+        if can_place:
+            # Update position and re-add
+            building.column = new_col
+            building.row = new_row
+            self.buildings.append(building)
+            return True, "Moved"
+        else:
+            # Revert and re-add
+            self.buildings.append(building)
+            return False, reason
         
     def get_occupied_cells(self) -> Set[Tuple[int, int]]:
         """Get all cells occupied by buildings"""
@@ -181,14 +251,14 @@ class CityGrid:
         
         return True
     
-    def can_place(self, building_type: BuildingType, column: int, row: int) -> Tuple[bool, str]:
+    def can_place(self, building_type: BuildingType, column: int, row: int, level: int = 1) -> Tuple[bool, str]:
         """Check if building can be placed at position"""
         
         # Check column unlocked
         if not self.is_unlocked(column):
             return False, "Column not unlocked"
         
-        template = get_building_template(building_type, 1)
+        template = get_building_template(building_type, level)
         width, height = template.footprint
         
         # Check bounds
@@ -237,11 +307,11 @@ class CityGrid:
         self.buildings.append(building)
         return building
     
-    def upgrade_building(self, building_id: int) -> bool:
+    def upgrade_building(self, building_id: int) -> Tuple[bool, str]:
         """Upgrade building to next level"""
         building = next((b for b in self.buildings if b.id == building_id), None)
         if not building or not building.can_upgrade():
-            return False
+            return False, "Cannot upgrade"
         
         old_footprint = building.template.footprint
         new_level = building.template.level + 1
@@ -253,18 +323,34 @@ class CityGrid:
             # Remove building temporarily
             self.buildings.remove(building)
             
-            can_place, reason = self.can_place(building.template.type, building.column, building.row)
+            # Try current position (expanding right/up)
+            can_place, reason = self.can_place(building.template.type, building.column, building.row, level=new_level)
             
-            # Add back
-            self.buildings.append(building)
-            
-            if not can_place:
-                return False
+            if can_place:
+                # Add back and proceed
+                self.buildings.append(building)
+            else:
+                # Try shifting left if width grew
+                width_diff = new_footprint[0] - old_footprint[0]
+                if width_diff > 0:
+                    test_col = building.column - width_diff
+                    can_place_left, reason_left = self.can_place(building.template.type, test_col, building.row, level=new_level)
+                    
+                    if can_place_left:
+                        building.column = test_col
+                        self.buildings.append(building)
+                        # Proceed with upgrade
+                    else:
+                        self.buildings.append(building)
+                        return False, f"No space to expand: {reason}"
+                else:
+                    self.buildings.append(building)
+                    return False, f"No space to expand: {reason}"
         
         # Apply upgrade
         building.template = new_template
         building.current_hp = new_template.max_hp  # Full heal on upgrade
-        return True
+        return True, "Upgraded"
     
     def destroy_building(self, building_id: int):
         """Destroy building and handle cascade"""
@@ -315,8 +401,8 @@ class CityGrid:
 GRID_START_X = 50
 GRID_SLOT_WIDTH = 60
 GRID_CELL_HEIGHT = 40
-GROUND_Y = 600
-SHIELD_Y = 200
+GROUND_Y = 620  # Moved down to make room for log
+SHIELD_Y = 300  # Lowered slightly
 SCREEN_WIDTH = 1280
 SCREEN_HEIGHT = 720
 
@@ -386,11 +472,12 @@ class CombatManager:
         
         enemy = Enemy(
             x=x,
-            y=SHIELD_Y - 100,  # spawn above shield
+            y=-50,  # Spawn off-screen top for longer descent
             max_hp=hp,
             current_hp=hp
         )
         self.enemies.append(enemy)
+        self.state.add_log(f"Enemy detected at sector {slot}!")
         
     def update(self, dt):
         """Main combat update loop"""
@@ -529,6 +616,7 @@ class CombatManager:
                     if enemy.current_hp <= 0:
                         enemy.alive = False
                         self.state.credits += 10
+                        self.state.add_log(f"Enemy destroyed! +10 Credits")
                     break
         
         # Enemies vs shield
@@ -539,10 +627,12 @@ class CombatManager:
             if enemy.y >= SHIELD_Y and enemy.y <= SHIELD_Y + 10:
                 if self.state.shield_current_hp > 0:
                     self.state.shield_current_hp -= enemy.damage
+                    self.state.add_log(f"Shield hit! -{enemy.damage} HP")
                     enemy.alive = False
                     
                     if self.state.shield_current_hp < 0:
                         self.state.shield_current_hp = 0
+                        self.state.add_log("SHIELD COLLAPSED!")
         
         # Enemies vs buildings
         for enemy in self.enemies:
@@ -562,11 +652,13 @@ class CombatManager:
                         
                         if building_y_top <= enemy.y <= building_y_bottom:
                             building.current_hp -= enemy.damage
+                            self.state.add_log(f"{building.template.type.value} hit! -{enemy.damage} HP")
                             enemy.alive = False
                             
                             if building.current_hp <= 0:
                                 self.state.grid.destroy_building(building.id)
                                 self.state.update_economy()
+                                self.state.add_log(f"{building.template.type.value} DESTROYED!")
                             break
     
     def end_wave(self):
@@ -579,13 +671,32 @@ class CombatManager:
                 perfect_wave = False
                 break
         
+        perfect_bonus = 0
         if perfect_wave:
-            base_reward = int(base_reward * 1.5)
+            perfect_bonus = int(base_reward * 0.5)
+            
+        energy_bonus = max(0, self.state.energy_surplus)
         
-        self.state.credits += base_reward
+        total_reward = base_reward + perfect_bonus + energy_bonus
+        
+        self.state.credits += total_reward
+        self.state.last_wave_rewards = WaveRewards(
+            base=base_reward,
+            perfect_bonus=perfect_bonus,
+            energy_bonus=energy_bonus,
+            total=total_reward
+        )
+        
         self.state.phase = "build"
         self.current_wave = None
         self.wave_complete_timer = 0
+
+@dataclass
+class WaveRewards:
+    base: int
+    perfect_bonus: int
+    energy_bonus: int
+    total: int
 
 @dataclass
 class GameState:
@@ -601,6 +712,8 @@ class GameState:
     selected_column: int = 0
     selected_row: int = 0
     combat: Optional[CombatManager] = None
+    last_wave_rewards: Optional[WaveRewards] = None
+    logs: List[str] = field(default_factory=list)
     
     def __post_init__(self):
         if self.grid is None:
@@ -608,6 +721,12 @@ class GameState:
         if self.combat is None:
             self.combat = CombatManager(self)
     
+    def add_log(self, message: str):
+        """Add a message to the persistent log"""
+        self.logs.append(message)
+        if len(self.logs) > 50: # Keep last 50
+            self.logs.pop(0)
+
     @property
     def energy_surplus(self) -> int:
         return self.energy_production - self.energy_consumption

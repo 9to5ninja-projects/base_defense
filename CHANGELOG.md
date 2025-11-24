@@ -2,6 +2,41 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.4] - 2025-11-24
+
+### Added
+- **Window Management**:
+  - Added support for **Fullscreen** (F11) and **Window Resizing**. The game now scales the internal resolution to fit the window.
+- **UI/UX**:
+  - **Combat Log**: Added a persistent message log at the bottom of the screen to track damage events and game notifications.
+  - **Layout**: Adjusted the game layout to provide more vertical space for enemy descent and a dedicated area for the log.
+
+### Changed
+- **Combat Balance**:
+  - **Enemy Spawning**: Enemies now spawn higher off-screen, giving players more time to react and turrets more time to engage.
+  - **Shield Position**: Lowered the shield slightly to increase the playable combat area.
+- **Logging**:
+  - Damage events (Enemy vs Shield, Turret vs Enemy) are now logged to the new combat log.
+
+## [0.2.3] - 2025-11-24
+
+### Added
+- **Economy**:
+  - **Energy Bonus**: Finishing a wave with positive Net Energy now rewards 1 Credit per energy unit.
+- **UI/UX**:
+  - **Wave Complete Popup**: A detailed summary screen now appears after each wave, showing Base Reward, Perfect Wave Bonus, and Energy Bonus.
+  - **Safety Warnings**: Added confirmation warnings when building or starting a wave would result in negative energy.
+
+## [0.2.2] - 2025-11-24
+
+### Changed
+- **Building Logic**:
+  - **Datacenters**: Now grow horizontally (1x1 -> 2x1 -> 3x1) instead of vertically. They no longer get taller with tiers.
+  - **Movement**: Added a safety check preventing buildings from being moved if they are supporting other structures.
+- **UI/UX**:
+  - Added "Next Level" preview stats in the HUD when selecting a building.
+  - Improved upgrade feedback messages.
+
 ## [0.2.1] - 2025-11-24
 
 ### Changed
