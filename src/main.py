@@ -8,11 +8,13 @@ from src.core_data import GameState, BuildingType, get_building_template, Enemy,
 FPS = 60
 
 # Layout Constants
-GRID_SLOT_WIDTH = 60
-MAX_COLS = 16
+# We use constants from core_data, but we need to recalculate derived values
+# GRID_SLOT_WIDTH is imported from core_data (40)
+MAX_COLS = 32
 GRID_WIDTH = GRID_SLOT_WIDTH * MAX_COLS
 UI_WIDTH = 300
 PLAYABLE_WIDTH = SCREEN_WIDTH - UI_WIDTH
+# Recalculate GRID_START_X to center it in the playable area
 GRID_START_X = (PLAYABLE_WIDTH - GRID_WIDTH) // 2
 UI_START_X = PLAYABLE_WIDTH
 
@@ -52,6 +54,7 @@ class Game:
         self.confirm_upgrade_id = None # ID of building waiting for upgrade confirmation
         self.confirm_build_type = None # Type of building waiting for build confirmation
         self.confirm_wave_start = False # Waiting for wave start confirmation
+        self.game_over = False
         
         self.font = pygame.font.Font(None, 24)
         self.font_large = pygame.font.Font(None, 36)
@@ -75,6 +78,11 @@ class Game:
                         self.display_surface = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
                     else:
                         self.display_surface = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.RESIZABLE)
+
+                if self.game_over:
+                    if event.key == pygame.K_r:
+                        self.restart_game()
+                    return
 
                 # Check for reward popup first
                 if self.state.last_wave_rewards:
@@ -123,6 +131,9 @@ class Game:
                 self.show_menu = False
         elif key == pygame.K_5:  # Quick build drone factory
             if self.try_build(BuildingType.DRONE_FACTORY):
+                self.show_menu = False
+        elif key == pygame.K_6:  # Quick build barracks
+            if self.try_build(BuildingType.BARRACKS):
                 self.show_menu = False
         elif key == pygame.K_u: # Upgrade
             self.try_upgrade()
@@ -321,6 +332,14 @@ class Game:
                 self.state.shield_max_hp,
                 self.state.shield_current_hp + recharge
             )
+            
+            # Check for reactivation (25% threshold)
+            if not self.state.shield_is_active:
+                threshold = self.state.shield_max_hp * 0.25
+                if self.state.shield_current_hp >= threshold:
+                    self.state.shield_is_active = True
+                    self.add_message("SHIELD ONLINE", GREEN)
+                    self.state.add_log("Shield Systems Restored")
         
         # Update messages
         for msg in self.messages:
@@ -329,9 +348,18 @@ class Game:
         
         # Check loss condition
         if not self.state.grid.buildings and self.state.wave > 0 and self.state.phase == "combat":  # No buildings left
-             # Only game over if we had buildings and lost them all? 
-             # Or maybe if we have 0 credits and 0 buildings?
-             pass
+             self.game_over = True
+             self.add_message("CRITICAL FAILURE: BASE DESTROYED", RED)
+
+    def restart_game(self):
+        """Reset game state to initial values"""
+        self.state = GameState()
+        # Ensure grid is initialized
+        from src.core_data import CityGrid
+        self.state.grid = CityGrid()
+        self.game_over = False
+        self.messages = []
+        self.add_message("System Rebooted. Ready for defense.", GREEN)
 
     def draw(self):
         self.screen.fill(BLACK)
@@ -342,6 +370,7 @@ class Game:
         
         if self.state.phase == "combat":
             self.draw_enemies()
+            self.draw_ground_units()
             self.draw_projectiles()
         
         self.draw_hud()
@@ -354,6 +383,9 @@ class Game:
         if self.state.last_wave_rewards:
             self.draw_wave_complete_popup()
             
+        if self.game_over:
+            self.draw_game_over()
+
         # Scale and draw to display surface
         window_w, window_h = self.display_surface.get_size()
         scale_w = window_w / SCREEN_WIDTH
@@ -398,6 +430,21 @@ class Game:
             
             color = YELLOW if proj.source == "turret" else RED
             pygame.draw.circle(self.screen, color, (int(proj.x), int(proj.y)), proj.radius)
+    
+    def draw_ground_units(self):
+        """Draw ground invaders and defenders"""
+        for unit in self.state.combat.ground_units:
+            if not unit.alive:
+                continue
+            
+            color = RED if unit.team == "invader" else BLUE
+            # Draw as small rectangles on the ground
+            rect = pygame.Rect(unit.x - 5, unit.y - 10, 10, 10)
+            pygame.draw.rect(self.screen, color, rect)
+            
+            # HP Bar
+            hp_ratio = unit.hp / unit.max_hp
+            pygame.draw.rect(self.screen, GREEN, (unit.x - 5, unit.y - 14, 10 * hp_ratio, 2))
     
     def draw_hud(self):
         """Draw UI elements in the right-side panel"""
@@ -449,7 +496,16 @@ class Game:
         if self.state.phase == "combat" and self.state.combat.current_wave:
             self.screen.blit(self.font.render("Combat Status:", True, RED), (x, y))
             y += 30
-            self.screen.blit(self.font.render(f"Enemies Active: {len(self.state.combat.enemies)}", True, WHITE), (x, y))
+            
+            # Count ground units
+            invaders = sum(1 for u in self.state.combat.ground_units if u.team == "invader" and u.alive)
+            defenders = sum(1 for u in self.state.combat.ground_units if u.team == "defender" and u.alive)
+            
+            self.screen.blit(self.font.render(f"Aerial Enemies: {len(self.state.combat.enemies)}", True, WHITE), (x, y))
+            y += 20
+            self.screen.blit(self.font.render(f"Ground Invaders: {invaders}", True, RED), (x, y))
+            y += 20
+            self.screen.blit(self.font.render(f"Defenders: {defenders}", True, BLUE), (x, y))
             y += 20
             self.screen.blit(self.font.render(f"Incoming: {self.state.combat.current_wave.enemies_remaining}", True, WHITE), (x, y))
             y += 20
@@ -467,7 +523,7 @@ class Game:
             y += 20
             self.screen.blit(self.font.render("Space: Build Menu", True, WHITE), (x, y))
             y += 20
-            self.screen.blit(self.font.render("1-5: Place Building", True, WHITE), (x, y))
+            self.screen.blit(self.font.render("1-6: Place Building", True, WHITE), (x, y))
             y += 20
             self.screen.blit(self.font.render("U: Upgrade | Del: Destroy", True, WHITE), (x, y))
             y += 20
@@ -554,7 +610,8 @@ class Game:
             BuildingType.DATACENTER,
             BuildingType.CAPACITOR,
             BuildingType.TURRET,
-            BuildingType.DRONE_FACTORY
+            BuildingType.DRONE_FACTORY,
+            BuildingType.BARRACKS
         ], 1):
             template = get_building_template(building_type, 1)
             text = f"[{i}] {building_type.value.replace('_', ' ').title()} - ${template.cost}"
@@ -566,6 +623,7 @@ class Game:
             if template.shield_hp_bonus > 0: stats.append(f"Shield: +{template.shield_hp_bonus}")
             if template.shield_recharge_bonus > 0: stats.append(f"Rchrg: +{template.shield_recharge_bonus:.1f}")
             if building_type == BuildingType.TURRET: stats.append("Dmg: 25")
+            if building_type == BuildingType.BARRACKS: stats.append("Spawns Defenders")
             
             stats_text = " | ".join(stats)
             
@@ -684,6 +742,8 @@ class Game:
             color = (0, 255, 255)  # Cyan
         elif building.template.type == BuildingType.TURRET:
             color = RED
+        elif building.template.type == BuildingType.BARRACKS:
+            color = (139, 69, 19) # Saddle Brown
         else:
             color = WHITE
         
@@ -710,6 +770,24 @@ class Game:
         """Draw shield line with variable thickness based on HP"""
         if self.state.shield_max_hp <= 0:
             return
+
+        # If broken, draw offline state
+        if not self.state.shield_is_active:
+             # Draw faint red line to show where it is
+             pygame.draw.line(self.screen, (50, 0, 0), 
+                        (GRID_START_X, SHIELD_Y), 
+                        (GRID_START_X + self.state.grid.max_columns * GRID_SLOT_WIDTH, SHIELD_Y), 1)
+             
+             # Show reboot progress
+             threshold = self.state.shield_max_hp * 0.25
+             if threshold > 0:
+                 pct = int((self.state.shield_current_hp / threshold) * 100)
+             else:
+                 pct = 0
+             text = f"SHIELD OFFLINE: {pct}% REBOOT"
+             text_surf = self.font.render(text, True, RED)
+             self.screen.blit(text_surf, (GRID_START_X, SHIELD_Y - 30))
+             return
 
         # Calculate thickness based on current HP
         thickness = max(2, min(50, int(self.state.shield_current_hp / 5)))
@@ -828,6 +906,30 @@ class Game:
         footer = self.font.render("Press SPACE to Continue", True, WHITE)
         footer_rect = footer.get_rect(center=(x + width//2, y + height - 30))
         self.screen.blit(footer, footer_rect)
+
+    def draw_game_over(self):
+        """Draw Game Over overlay"""
+        # Semi-transparent background
+        s = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
+        s.set_alpha(200)
+        s.fill((20, 0, 0))
+        self.screen.blit(s, (0, 0))
+        
+        # Game Over Text
+        title = self.font_large.render("GAME OVER", True, RED)
+        title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 50))
+        self.screen.blit(title, title_rect)
+        
+        # Stats
+        stats_text = f"Waves Survived: {self.state.wave - 1}"
+        stats = self.font.render(stats_text, True, WHITE)
+        stats_rect = stats.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2))
+        self.screen.blit(stats, stats_rect)
+        
+        # Restart Prompt
+        restart = self.font.render("Press R to Restart", True, YELLOW)
+        restart_rect = restart.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 50))
+        self.screen.blit(restart, restart_rect)
     
     def run(self):
         while self.running:

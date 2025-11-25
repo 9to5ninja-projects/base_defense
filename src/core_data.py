@@ -9,6 +9,7 @@ class BuildingType(Enum):
     CAPACITOR = "capacitor"
     TURRET = "turret"
     DRONE_FACTORY = "drone_factory"
+    BARRACKS = "barracks"
 
 @dataclass
 class BuildingTemplate:
@@ -43,9 +44,12 @@ class BuildingTemplate:
             else:  # tier 3
                 return (3, 3)
         
-        elif self.type in [BuildingType.DATACENTER, BuildingType.CAPACITOR]:
+        elif self.type in [BuildingType.DATACENTER, BuildingType.CAPACITOR, BuildingType.BARRACKS]:
             # Datacenters grow horizontally now (Tier x 1)
             if self.type == BuildingType.DATACENTER:
+                return (self.tier, 1)
+            # Barracks also grow horizontally
+            if self.type == BuildingType.BARRACKS:
                 return (self.tier, 1)
             # Capacitors still grow vertically? Or should they match?
             # Keeping Capacitors vertical for now as requested only for Datacenter
@@ -104,6 +108,15 @@ def get_building_template(building_type: BuildingType, level: int) -> BuildingTe
             'cost': 130,
             'upgrade_cost': 0,  # Cannot upgrade
         },
+        BuildingType.BARRACKS: {
+            'max_hp': 200,
+            'energy_production': 0,
+            'energy_consumption': 5,
+            'shield_hp_bonus': 0,
+            'shield_recharge_bonus': 0,
+            'cost': 100,
+            'upgrade_cost': 80,
+        },
     }
     
     base = base_stats[building_type]
@@ -130,6 +143,7 @@ class Building:
     current_hp: int
     column: int  # left-most column position
     row: int  # bottom row position
+    spawn_timer: float = 0.0
     
     @property
     def cells(self) -> Set[Tuple[int, int]]:
@@ -146,7 +160,7 @@ class Building:
         return self.template.upgrade_cost > 0 and self.template.level < 9
 
 class CityGrid:
-    def __init__(self, unlocked_columns: int = 8, max_columns: int = 16):
+    def __init__(self, unlocked_columns: int = 16, max_columns: int = 32):
         self.max_columns = max_columns
         self.unlocked_width = unlocked_columns
         # Start centered
@@ -287,6 +301,22 @@ class CityGrid:
             if not (left_vacant or right_vacant):
                 return False, "Datacenter needs vacant neighbor column"
         
+        # Special rule: Barracks placement
+        if building_type == BuildingType.BARRACKS:
+            if row > 0:
+                # Must be on top of another Barracks
+                below_building = self.get_building_at(column, row - 1)
+                if not below_building or below_building.template.type != BuildingType.BARRACKS:
+                    return False, "Barracks must be on Ground or other Barracks"
+        
+        # Special rule: Stacking ON TOP of Barracks
+        if row > 0:
+            below_building = self.get_building_at(column, row - 1)
+            if below_building and below_building.template.type == BuildingType.BARRACKS:
+                # Only defensive (Turret) or Barracks allowed
+                if building_type not in [BuildingType.TURRET, BuildingType.BARRACKS]:
+                    return False, "Only Defensive buildings allowed on Barracks"
+
         return True, "OK"
     
     def place_building(self, building_type: BuildingType, column: int, row: int) -> Optional[Building]:
@@ -399,12 +429,25 @@ class CityGrid:
 
 # --- Constants ---
 GRID_START_X = 50
-GRID_SLOT_WIDTH = 60
+GRID_SLOT_WIDTH = 40
 GRID_CELL_HEIGHT = 40
 GROUND_Y = 620  # Moved down to make room for log
 SHIELD_Y = 300  # Lowered slightly
-SCREEN_WIDTH = 1280
+SCREEN_WIDTH = 1600
 SCREEN_HEIGHT = 720
+
+@dataclass
+class GroundUnit:
+    x: float
+    y: float
+    team: str  # "invader" or "defender"
+    hp: int
+    max_hp: int
+    damage: int
+    speed: float
+    target: Optional[object] = None # Building or GroundUnit
+    attack_cooldown: float = 0.0
+    alive: bool = True
 
 @dataclass
 class Enemy:
@@ -447,6 +490,7 @@ class CombatManager:
         self.state = game_state
         self.enemies: List[Enemy] = []
         self.projectiles: List[Projectile] = []
+        self.ground_units: List[GroundUnit] = []
         self.current_wave: Optional[Wave] = None
         self.wave_complete_timer: float = 0
         
@@ -460,6 +504,7 @@ class CombatManager:
         
         self.enemies.clear()
         self.projectiles.clear()
+        self.ground_units.clear()
         
     def spawn_enemy(self):
         """Spawn a single enemy at random x position"""
@@ -495,8 +540,14 @@ class CombatManager:
         # Update enemies
         self.update_enemies(dt)
         
+        # Update ground units
+        self.update_ground_units(dt)
+        
         # Turrets fire
         self.update_turrets(dt)
+        
+        # Barracks produce
+        self.update_barracks(dt)
         
         # Update projectiles
         self.update_projectiles(dt)
@@ -507,9 +558,10 @@ class CombatManager:
         # Clean up dead entities
         self.enemies = [e for e in self.enemies if e.alive]
         self.projectiles = [p for p in self.projectiles if p.alive]
+        self.ground_units = [u for u in self.ground_units if u.alive]
         
         # Check wave completion
-        if self.current_wave.enemies_remaining == 0 and len(self.enemies) == 0:
+        if self.current_wave.enemies_remaining == 0 and len(self.enemies) == 0 and len(self.ground_units) == 0:
             self.wave_complete_timer += dt
             if self.wave_complete_timer >= 2.0:  # 2 second delay before build phase
                 self.end_wave()
@@ -521,16 +573,176 @@ class CombatManager:
             
             # Check if enemy reached ground (destroy bottom building)
             if enemy.y >= GROUND_Y:
-                col = int((enemy.x - GRID_START_X) / GRID_SLOT_WIDTH)
-                if 0 <= col < self.state.grid.max_columns:
-                    building = self.state.grid.get_building_at(col, 0)
-                    if building:
-                        building.current_hp -= enemy.damage
-                        if building.current_hp <= 0:
-                            self.state.grid.destroy_building(building.id)
-                            self.state.update_economy()
+                # Check for collision with any building at ground level
+                hit_building = None
+                
+                # Check a small range around the enemy center to account for width
+                # Enemy radius is 15. Grid slot is 40.
+                # We check the column at center, left edge, and right edge
+                check_points = [enemy.x, enemy.x - enemy.radius, enemy.x + enemy.radius]
+                
+                for check_x in check_points:
+                    col = int((check_x - GRID_START_X) / GRID_SLOT_WIDTH)
+                    if 0 <= col < self.state.grid.max_columns:
+                        building = self.state.grid.get_building_at(col, 0)
+                        if building:
+                            hit_building = building
+                            break
+                
+                if hit_building:
+                    hit_building.current_hp -= enemy.damage
+                    self.state.add_log(f"Enemy crashed into {hit_building.template.type.value}!")
+                    if hit_building.current_hp <= 0:
+                        self.state.grid.destroy_building(hit_building.id)
+                        self.state.update_economy()
+                else:
+                    # Hit empty ground - Spawn Invaders
+                    # Spawn 2 invaders per crasher
+                    self.spawn_ground_invader(enemy.x, count=2)
+                        
                 enemy.alive = False
-    
+
+    def spawn_ground_invader(self, x, count=1):
+        """Spawn invader ground units"""
+        for _ in range(count):
+            # Add slight offset so they don't stack perfectly
+            offset = random.randint(-15, 15)
+            invader = GroundUnit(
+                x=x + offset,
+                y=GROUND_Y,
+                team="invader",
+                hp=25 + (self.state.wave * 5),
+                max_hp=25 + (self.state.wave * 5),
+                damage=0, # Damage is based on HP on impact
+                speed=45
+            )
+            self.ground_units.append(invader)
+        self.state.add_log(f"{count} Ground Invaders Spawned!")
+
+    def update_ground_units(self, dt):
+        """Update movement and combat for ground units"""
+        for unit in self.ground_units:
+            if not unit.alive:
+                continue
+                
+            if unit.attack_cooldown > 0:
+                unit.attack_cooldown -= dt
+            
+            # Find target
+            target = None
+            if unit.team == "invader":
+                # Target nearest building OR defender
+                # Prioritize defenders if close? Or just nearest entity?
+                # Let's go with nearest entity (Building or Defender)
+                min_dist = 9999
+                
+                # Check buildings
+                for b in self.state.grid.buildings:
+                    bx = GRID_START_X + b.column * GRID_SLOT_WIDTH + (b.template.footprint[0] * GRID_SLOT_WIDTH / 2)
+                    dist = abs(unit.x - bx)
+                    if dist < min_dist:
+                        min_dist = dist
+                        target = b
+                
+                # Check defenders
+                for other in self.ground_units:
+                    if other.team == "defender" and other.alive:
+                        dist = abs(unit.x - other.x)
+                        if dist < min_dist:
+                            min_dist = dist
+                            target = other
+                            
+            else: # defender
+                # Target nearest invader
+                min_dist = 9999
+                for other in self.ground_units:
+                    if other.team == "invader" and other.alive:
+                        dist = abs(unit.x - other.x)
+                        if dist < min_dist:
+                            min_dist = dist
+                            target = other
+            
+            if target:
+                # Move or Attack
+                target_x = 0
+                if isinstance(target, Building):
+                    target_x = GRID_START_X + target.column * GRID_SLOT_WIDTH + (target.template.footprint[0] * GRID_SLOT_WIDTH / 2)
+                else:
+                    target_x = target.x
+                
+                dist = abs(unit.x - target_x)
+                attack_range = 15 if unit.team == "invader" else 30
+                
+                if dist <= attack_range:
+                    # Attack
+                    if unit.attack_cooldown <= 0:
+                        if unit.team == "invader":
+                            # Kamikaze behavior: Explode dealing HP as damage
+                            damage = unit.hp
+                            
+                            if isinstance(target, Building):
+                                target.current_hp -= damage
+                                self.state.add_log(f"Invader exploded! -{damage} HP to Building")
+                                if target.current_hp <= 0:
+                                    self.state.grid.destroy_building(target.id)
+                                    self.state.update_economy()
+                            else:
+                                target.hp -= damage
+                                self.state.add_log(f"Invader exploded! -{damage} HP to Defender")
+                                if target.hp <= 0:
+                                    target.alive = False
+                            
+                            unit.alive = False # Self destruct
+                        else:
+                            # Defender behavior: Standard shooting/melee
+                            if isinstance(target, Building):
+                                pass # Defenders don't attack buildings
+                            else:
+                                target.hp -= unit.damage
+                                if target.hp <= 0:
+                                    target.alive = False
+                                    self.state.add_log("Invader neutralized.")
+                            unit.attack_cooldown = 1.0
+                else:
+                    # Move
+                    direction = 1 if target_x > unit.x else -1
+                    unit.x += direction * unit.speed * dt
+
+    def update_barracks(self, dt):
+        """Handle Barracks production"""
+        for building in self.state.grid.buildings:
+            if building.template.type == BuildingType.BARRACKS:
+                # Count active defenders from this barracks? 
+                # For simplicity, let's just cap total defenders based on total barracks level for now
+                # Or just spawn periodically if under a local cap.
+                # Let's do local cap: 2 defenders per level
+                
+                # We need to link defenders to their source barracks to track cap properly, 
+                # but for now let's just spawn if global defender count is low relative to barracks count
+                # Actually, let's just spawn one every X seconds if we have energy
+                
+                if self.state.energy_surplus >= 0: # Only works if power is on
+                    building.spawn_timer += dt
+                    spawn_interval = 10.0 / building.template.level
+                    
+                    if building.spawn_timer >= spawn_interval:
+                        # Spawn defender
+                        width = building.template.footprint[0]
+                        bx = GRID_START_X + building.column * GRID_SLOT_WIDTH + (width * GRID_SLOT_WIDTH / 2)
+                        
+                        defender = GroundUnit(
+                            x=bx,
+                            y=GROUND_Y,
+                            team="defender",
+                            hp=40 * building.template.level,
+                            max_hp=40 * building.template.level,
+                            damage=8 * building.template.level,
+                            speed=60
+                        )
+                        self.ground_units.append(defender)
+                        building.spawn_timer = 0
+                        # self.state.add_log("Defender Deployed") # Too spammy?
+
     def update_turrets(self, dt):
         """Turrets acquire and fire at enemies"""
         for building in self.state.grid.buildings:
@@ -624,15 +836,17 @@ class CombatManager:
             if not enemy.alive:
                 continue
                 
-            if enemy.y >= SHIELD_Y and enemy.y <= SHIELD_Y + 10:
+            # Only check collision if shield is active
+            if self.state.shield_is_active and enemy.y >= SHIELD_Y and enemy.y <= SHIELD_Y + 10:
                 if self.state.shield_current_hp > 0:
                     self.state.shield_current_hp -= enemy.damage
                     self.state.add_log(f"Shield hit! -{enemy.damage} HP")
                     enemy.alive = False
                     
-                    if self.state.shield_current_hp < 0:
+                    if self.state.shield_current_hp <= 0:
                         self.state.shield_current_hp = 0
-                        self.state.add_log("SHIELD COLLAPSED!")
+                        self.state.shield_is_active = False
+                        self.state.add_log("SHIELD COLLAPSED! REBOOTING...")
         
         # Enemies vs buildings
         for enemy in self.enemies:
@@ -714,6 +928,7 @@ class GameState:
     combat: Optional[CombatManager] = None
     last_wave_rewards: Optional[WaveRewards] = None
     logs: List[str] = field(default_factory=list)
+    shield_is_active: bool = True
     
     def __post_init__(self):
         if self.grid is None:

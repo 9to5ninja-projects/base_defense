@@ -2,6 +2,38 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.7] - 2025-11-24
+
+### Changed
+- **Combat Logic**:
+  - **Collision Detection**: Improved ground collision logic. Enemies now check for building overlap using their full width/radius when hitting the ground, fixing an issue where enemies would miss narrow buildings (like Barracks) and spawn invaders instead of dealing damage.
+- **UI/UX**:
+  - **Combat HUD**: Expanded the Combat Status panel to show detailed counts for **Aerial Enemies**, **Ground Invaders**, and **Defenders**.
+
+## [0.2.6] - 2025-11-24
+
+### Added
+- **Grid Expansion**:
+  - Doubled the grid width to **32 columns** (16 unlocked by default) to accommodate wider bases and ground combat.
+  - Adjusted rendering to fit the wider grid within the window.
+- **Ground War Mechanics**:
+  - **Ground Invasion**: Kamikaze enemies that hit the ground now spawn **2 Ground Invaders**.
+  - **Invader Behavior**: Invaders move towards the nearest building or defender and **self-destruct** on contact, dealing massive damage.
+  - **Barracks**: New building type that automatically spawns **Defenders** (Ground Units) if energy is positive.
+  - **Defenders**: Friendly ground units that patrol and engage invaders to protect the base.
+- **UI/UX**:
+  - Added Barracks to the Build Menu.
+  - Added rendering for Ground Units (Red for Invaders, Blue for Defenders).
+
+## [0.2.5] - 2025-11-24
+
+### Added
+- **Game Loop**:
+  - **Game Over Screen**: Added a proper Game Over state when all buildings are destroyed, allowing the player to restart (Press 'R').
+- **Combat Mechanics**:
+  - **Shield Collapse**: If the shield HP reaches 0, it now goes "Offline". Enemies pass through it without taking damage.
+  - **Shield Reboot**: An offline shield will automatically reboot once it regenerates to 25% of its max HP.
+
 ## [0.2.4] - 2025-11-24
 
 ### Added
