@@ -36,9 +36,9 @@
     - [x] **Wave 10 Boss**: Giant Kamikaze (High HP, Slow, Large Blast Radius).
 
 ## Phase 5: System & Meta
-- [ ] **Game Loop**:
-    - [ ] **Main Menu**: Proper beginning interface.
-    - [ ] **Save/Load**: Persist game progress.
+- [x] **Game Loop**:
+    - [x] **Main Menu**: Proper beginning interface.
+    - [x] **Save/Load**: Persist game progress.
 - [ ] **Audio**:
     - [ ] Sound effects and Background music.
 - [ ] **Refactoring**:

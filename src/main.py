@@ -3,6 +3,8 @@ import sys
 import random
 import math
 import copy
+import pickle
+import os
 from src.core_data import GameState, BuildingType, get_building_template, Enemy, Projectile, GRID_START_X, GRID_SLOT_WIDTH, GRID_CELL_HEIGHT, GROUND_Y, SHIELD_Y, SCREEN_WIDTH, SCREEN_HEIGHT, UI_WIDTH, MAX_COLS
 
 # Constants
@@ -37,12 +39,9 @@ class Game:
         self.running = True
         self.fullscreen = False
         
-        self.state = GameState()
-        # Ensure grid is initialized
-        if self.state.grid is None:
-            from src.core_data import CityGrid
-            self.state.grid = CityGrid()
-            
+        self.menu_state = "MAIN_MENU" # MAIN_MENU, PLAYING, PAUSED
+        self.state = None # Initialized on New Game
+        
         self.show_menu = False
         self.messages = [] # List of (text, color, timer)
         self.moving_building_id = None
@@ -51,10 +50,58 @@ class Game:
         self.confirm_build_type = None # Type of building waiting for build confirmation
         self.confirm_wave_start = False # Waiting for wave start confirmation
         self.game_over = False
-        self.saved_state = copy.deepcopy(self.state) # Save initial state for retry
+        self.saved_state = None # Save initial state for retry
         
         self.font = pygame.font.Font(None, 24)
         self.font_large = pygame.font.Font(None, 36)
+        self.font_title = pygame.font.Font(None, 72)
+
+    def new_game(self):
+        """Start a fresh game"""
+        self.state = GameState()
+        # Ensure grid is initialized
+        if self.state.grid is None:
+            from src.core_data import CityGrid
+            self.state.grid = CityGrid()
+        
+        self.menu_state = "PLAYING"
+        self.game_over = False
+        self.messages = []
+        self.saved_state = copy.deepcopy(self.state)
+        self.add_message("System Online. Good luck, Commander.", GREEN)
+
+    def save_game(self, filename="savegame.dat"):
+        """Save current state to file"""
+        try:
+            path = os.path.join("saves", filename)
+            with open(path, "wb") as f:
+                pickle.dump(self.state, f)
+            self.add_message("Game Saved", GREEN)
+        except Exception as e:
+            self.add_message(f"Save Failed: {e}", RED)
+            print(f"Save error: {e}")
+
+    def load_game(self, filename="savegame.dat"):
+        """Load state from file"""
+        try:
+            path = os.path.join("saves", filename)
+            if not os.path.exists(path):
+                return False
+                
+            with open(path, "rb") as f:
+                self.state = pickle.load(f)
+            
+            self.menu_state = "PLAYING"
+            self.game_over = False
+            self.messages = []
+            self.saved_state = copy.deepcopy(self.state) # Update retry point? Or keep original?
+            # Actually, loading a save should probably not reset the retry point unless we save that too.
+            # But for now, let's just let it be.
+            self.add_message("Game Loaded", GREEN)
+            return True
+        except Exception as e:
+            print(f"Load error: {e}")
+            return False
         
     def add_message(self, text, color=WHITE, duration=3.0):
         self.messages.append({'text': text, 'color': color, 'timer': duration})
@@ -75,22 +122,63 @@ class Game:
                         self.display_surface = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
                     else:
                         self.display_surface = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.RESIZABLE)
+                
+                if self.menu_state == "MAIN_MENU":
+                    self.handle_main_menu_input(event.key)
+                elif self.menu_state == "PAUSED":
+                    self.handle_pause_menu_input(event.key)
+                elif self.menu_state == "PLAYING":
+                    if event.key == pygame.K_ESCAPE:
+                        if self.moving_building_id is not None:
+                            self.moving_building_id = None
+                            self.add_message("Move Cancelled", YELLOW)
+                        elif self.show_menu:
+                            self.show_menu = False
+                        elif self.state.last_wave_rewards:
+                            self.state.last_wave_rewards = None
+                        else:
+                            self.menu_state = "PAUSED"
+                        return
 
-                if self.game_over:
-                    if event.key == pygame.K_r:
-                        self.restart_game()
-                    elif event.key == pygame.K_t and self.saved_state:
-                        self.retry_wave()
-                    return
+                    if self.game_over:
+                        if event.key == pygame.K_r:
+                            self.restart_game()
+                        elif event.key == pygame.K_t and self.saved_state:
+                            self.retry_wave()
+                        elif event.key == pygame.K_q:
+                            self.menu_state = "MAIN_MENU"
+                        return
 
-                # Check for reward popup first
-                if self.state.last_wave_rewards:
-                    if event.key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_ESCAPE):
-                        self.state.last_wave_rewards = None # Dismiss
-                    return # Block other input while popup is up
+                    # Check for reward popup first
+                    if self.state.last_wave_rewards:
+                        if event.key in (pygame.K_RETURN, pygame.K_SPACE):
+                            self.state.last_wave_rewards = None # Dismiss
+                        return # Block other input while popup is up
 
-                if self.state.phase == "build":
-                    self.handle_build_input(event.key)
+                    if self.state.phase == "build":
+                        self.handle_build_input(event.key)
+
+    def handle_main_menu_input(self, key):
+        if key == pygame.K_n:
+            self.new_game()
+        elif key == pygame.K_l:
+            if not self.load_game():
+                # Show error somehow? For now just print
+                print("No save file found")
+        elif key == pygame.K_q or key == pygame.K_ESCAPE:
+            self.running = False
+
+    def handle_pause_menu_input(self, key):
+        if key == pygame.K_ESCAPE:
+            self.menu_state = "PLAYING"
+        elif key == pygame.K_s:
+            self.save_game()
+            self.menu_state = "PLAYING"
+        elif key == pygame.K_m:
+            self.menu_state = "MAIN_MENU"
+            self.state = None # Clear state
+        elif key == pygame.K_q:
+            self.running = False
     
     def handle_build_input(self, key):
         if key == pygame.K_LEFT:
@@ -337,6 +425,9 @@ class Game:
         self.add_message(f"Wave {self.state.wave} Started!", RED)
     
     def update(self, dt):
+        if self.menu_state != "PLAYING":
+            return
+
         prev_phase = self.state.phase
         
         if self.state.phase == "combat":
@@ -394,14 +485,7 @@ class Game:
 
     def restart_game(self):
         """Reset game state to initial values"""
-        self.state = GameState()
-        # Ensure grid is initialized
-        from src.core_data import CityGrid
-        self.state.grid = CityGrid()
-        self.game_over = False
-        self.messages = []
-        self.saved_state = copy.deepcopy(self.state) # Save initial state for retry
-        self.add_message("System Rebooted. Ready for defense.", GREEN)
+        self.new_game()
 
     def retry_wave(self):
         """Restore state to beginning of last wave"""
@@ -414,27 +498,34 @@ class Game:
     def draw(self):
         self.screen.fill(BLACK)
         
-        self.draw_grid()
-        self.draw_buildings()
-        self.draw_shield()
-        
-        if self.state.phase == "combat":
-            self.draw_enemies()
-            self.draw_ground_units()
-            self.draw_projectiles()
-        
-        self.draw_hud()
-        self.draw_messages()
-        self.draw_message_log()
-        
-        if self.show_menu and self.state.phase == "build":
-            self.draw_build_menu()
-        
-        if self.state.last_wave_rewards and not self.game_over:
-            self.draw_wave_complete_popup()
+        if self.menu_state == "MAIN_MENU":
+            self.draw_main_menu()
+        else:
+            # Draw Game
+            self.draw_grid()
+            self.draw_buildings()
+            self.draw_shield()
             
-        if self.game_over:
-            self.draw_game_over()
+            if self.state.phase == "combat":
+                self.draw_enemies()
+                self.draw_ground_units()
+                self.draw_projectiles()
+            
+            self.draw_hud()
+            self.draw_messages()
+            self.draw_message_log()
+            
+            if self.show_menu and self.state.phase == "build":
+                self.draw_build_menu()
+            
+            if self.state.last_wave_rewards and not self.game_over:
+                self.draw_wave_complete_popup()
+                
+            if self.game_over:
+                self.draw_game_over()
+                
+            if self.menu_state == "PAUSED":
+                self.draw_pause_menu()
 
         # Scale and draw to display surface
         window_w, window_h = self.display_surface.get_size()
@@ -453,6 +544,64 @@ class Game:
         self.display_surface.blit(scaled_surf, (offset_x, offset_y))
         
         pygame.display.flip()
+
+    def draw_main_menu(self):
+        """Draw Main Menu"""
+        # Background
+        self.screen.fill((20, 20, 30))
+        
+        # Title
+        title = self.font_title.render("MISSILE DEFENSE", True, GREEN)
+        subtitle = self.font_large.render("CELL GRID COMMAND", True, WHITE)
+        
+        title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 200))
+        subtitle_rect = subtitle.get_rect(center=(SCREEN_WIDTH // 2, 260))
+        
+        self.screen.blit(title, title_rect)
+        self.screen.blit(subtitle, subtitle_rect)
+        
+        # Options
+        options = [
+            "[N] New Game",
+            "[L] Load Game",
+            "[Q] Quit"
+        ]
+        
+        y = 400
+        for opt in options:
+            text = self.font_large.render(opt, True, WHITE)
+            rect = text.get_rect(center=(SCREEN_WIDTH // 2, y))
+            self.screen.blit(text, rect)
+            y += 50
+            
+        # Footer
+        footer = self.font.render("v0.2.16 - 2025", True, GRAY)
+        self.screen.blit(footer, (10, SCREEN_HEIGHT - 30))
+
+    def draw_pause_menu(self):
+        """Draw Pause Menu Overlay"""
+        s = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
+        s.set_alpha(200)
+        s.fill(BLACK)
+        self.screen.blit(s, (0, 0))
+        
+        title = self.font_title.render("PAUSED", True, YELLOW)
+        title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 200))
+        self.screen.blit(title, title_rect)
+        
+        options = [
+            "[ESC] Resume",
+            "[S] Save Game",
+            "[M] Main Menu",
+            "[Q] Quit Desktop"
+        ]
+        
+        y = 350
+        for opt in options:
+            text = self.font_large.render(opt, True, WHITE)
+            rect = text.get_rect(center=(SCREEN_WIDTH // 2, y))
+            self.screen.blit(text, rect)
+            y += 50
 
     def draw_enemies(self):
         """Draw all active enemies"""

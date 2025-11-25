@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.17] - 2025-11-25
+
+### Added
+- **System & Meta**:
+  - **Main Menu**: Added a start screen with "New Game", "Load Game", and "Quit" options.
+  - **Save/Load System**: Implemented full game state persistence using `pickle`. Games can be saved and loaded from the `saves/` directory.
+  - **Pause Menu**: Added an in-game pause menu (ESC) with options to Resume, Save, Return to Main Menu, or Quit.
+  - **State Machine**: Refactored the game loop to support distinct states (MAIN_MENU, PLAYING, PAUSED).
+
 ## [0.2.16] - 2025-11-25
 
 ### Added
