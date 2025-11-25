@@ -486,6 +486,8 @@ class Game:
         self.screen.blit(self.font.render(f"Cons: {self.state.energy_consumption}", True, RED), (x, y))
         y += 20
         self.screen.blit(self.font.render(f"Net:  {self.state.energy_surplus}", True, energy_color), (x, y))
+        y += 20
+        self.screen.blit(self.font.render(f"S.Regen: {self.state.shield_recharge_rate:.1f}/s", True, (0, 200, 255)), (x, y))
         y += 40
 
         # Separator
@@ -557,6 +559,15 @@ class Game:
                 y += 20
                 self.screen.blit(self.font.render(f"HP: {building.current_hp}/{building.template.max_hp}", True, WHITE), (x, y))
                 y += 20
+                
+                # Add specific stats
+                if building.template.type == BuildingType.TURRET:
+                    self.screen.blit(self.font.render(f"Dmg: {building.template.damage} | Rng: {building.template.range}", True, RED), (x, y))
+                    y += 20
+                elif building.template.type == BuildingType.BARRACKS:
+                    self.screen.blit(self.font.render(f"Cap: {building.template.capacity} Defenders", True, BLUE), (x, y))
+                    y += 20
+                
                 if building.can_upgrade():
                     self.screen.blit(self.font.render(f"Upgrade: ${building.template.upgrade_cost}", True, YELLOW), (x, y))
                     y += 20
@@ -684,17 +695,29 @@ class Game:
         self.screen.blit(s, (unlocked_x, GROUND_Y - rows * GRID_CELL_HEIGHT))
             
         # Selection highlight
-        sel_x = GRID_START_X + self.state.selected_column * GRID_SLOT_WIDTH
-        sel_y = GROUND_Y - (self.state.selected_row + 1) * GRID_CELL_HEIGHT
-        
-        # Color based on unlocked status
-        if self.state.grid.is_unlocked(self.state.selected_column):
-            color = YELLOW
-        else:
-            color = RED
+        if self.state.phase == "build":
+            sel_x = GRID_START_X + self.state.selected_column * GRID_SLOT_WIDTH
+            sel_y = GROUND_Y - (self.state.selected_row + 1) * GRID_CELL_HEIGHT
             
-        pygame.draw.rect(self.screen, color, 
-                       (sel_x, sel_y, GRID_SLOT_WIDTH, GRID_CELL_HEIGHT), 2)
+            # Color based on unlocked status
+            if self.state.grid.is_unlocked(self.state.selected_column):
+                color = YELLOW
+            else:
+                color = RED
+                
+            pygame.draw.rect(self.screen, color, 
+                           (sel_x, sel_y, GRID_SLOT_WIDTH, GRID_CELL_HEIGHT), 2)
+            
+            # Draw Range Indicator if Turret
+            building = self.state.grid.get_building_at(self.state.selected_column, self.state.selected_row)
+            if building and building.template.type == BuildingType.TURRET:
+                # Calculate center of turret
+                width, height = building.template.footprint
+                turret_x = GRID_START_X + building.column * GRID_SLOT_WIDTH + (width * GRID_SLOT_WIDTH) / 2
+                turret_y = GROUND_Y - building.row * GRID_CELL_HEIGHT - (height * GRID_CELL_HEIGHT) / 2
+                
+                # Draw circle
+                pygame.draw.circle(self.screen, (255, 0, 0), (int(turret_x), int(turret_y)), building.template.range, 1)
     
     def draw_buildings(self):
         """Draw all buildings in the grid"""

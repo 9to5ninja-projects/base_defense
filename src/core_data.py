@@ -22,6 +22,9 @@ class BuildingTemplate:
     shield_recharge_bonus: float
     cost: int
     upgrade_cost: int  # cost to level up
+    damage: int = 0
+    range: int = 0
+    capacity: int = 0
     
     @property
     def tier(self) -> int:
@@ -71,6 +74,9 @@ def get_building_template(building_type: BuildingType, level: int) -> BuildingTe
             'shield_recharge_bonus': 0,
             'cost': 50,
             'upgrade_cost': 40,
+            'damage': 0,
+            'range': 0,
+            'capacity': 0,
         },
         BuildingType.DATACENTER: {
             'max_hp': 100,
@@ -80,6 +86,9 @@ def get_building_template(building_type: BuildingType, level: int) -> BuildingTe
             'shield_recharge_bonus': 0,
             'cost': 75,
             'upgrade_cost': 60,
+            'damage': 0,
+            'range': 0,
+            'capacity': 0,
         },
         BuildingType.CAPACITOR: {
             'max_hp': 80,
@@ -89,6 +98,9 @@ def get_building_template(building_type: BuildingType, level: int) -> BuildingTe
             'shield_recharge_bonus': 2.0,
             'cost': 60,
             'upgrade_cost': 50,
+            'damage': 0,
+            'range': 0,
+            'capacity': 0,
         },
         BuildingType.TURRET: {
             'max_hp': 120,
@@ -98,6 +110,9 @@ def get_building_template(building_type: BuildingType, level: int) -> BuildingTe
             'shield_recharge_bonus': 0,
             'cost': 80,
             'upgrade_cost': 0,  # Cannot upgrade
+            'damage': 25,
+            'range': 600,
+            'capacity': 0,
         },
         BuildingType.DRONE_FACTORY: {
             'max_hp': 130,
@@ -107,6 +122,9 @@ def get_building_template(building_type: BuildingType, level: int) -> BuildingTe
             'shield_recharge_bonus': 0,
             'cost': 130,
             'upgrade_cost': 0,  # Cannot upgrade
+            'damage': 0,
+            'range': 0,
+            'capacity': 0,
         },
         BuildingType.BARRACKS: {
             'max_hp': 200,
@@ -116,6 +134,9 @@ def get_building_template(building_type: BuildingType, level: int) -> BuildingTe
             'shield_recharge_bonus': 0,
             'cost': 100,
             'upgrade_cost': 80,
+            'damage': 0,
+            'range': 0,
+            'capacity': 2,
         },
     }
     
@@ -134,6 +155,9 @@ def get_building_template(building_type: BuildingType, level: int) -> BuildingTe
         shield_recharge_bonus=base['shield_recharge_bonus'] * scale,
         cost=base['cost'],
         upgrade_cost=base['upgrade_cost'],
+        damage=int(base['damage'] * scale),
+        range=int(base['range'] * (1 + (level - 1) * 0.1)), # Range scales slower (10%)
+        capacity=int(base['capacity'] * level), # Capacity scales linearly with level (2, 4, 6...)
     )
 
 @dataclass
@@ -711,18 +735,17 @@ class CombatManager:
 
     def update_barracks(self, dt):
         """Handle Barracks production"""
+        # Calculate total capacity and current defenders
+        total_capacity = sum(b.template.capacity for b in self.state.grid.buildings if b.template.type == BuildingType.BARRACKS)
+        current_defenders = sum(1 for u in self.ground_units if u.team == "defender" and u.alive)
+        
         for building in self.state.grid.buildings:
             if building.template.type == BuildingType.BARRACKS:
-                # Count active defenders from this barracks? 
-                # For simplicity, let's just cap total defenders based on total barracks level for now
-                # Or just spawn periodically if under a local cap.
-                # Let's do local cap: 2 defenders per level
-                
-                # We need to link defenders to their source barracks to track cap properly, 
-                # but for now let's just spawn if global defender count is low relative to barracks count
-                # Actually, let's just spawn one every X seconds if we have energy
-                
                 if self.state.energy_surplus >= 0: # Only works if power is on
+                    # Check capacity (Global pool for now)
+                    if current_defenders >= total_capacity:
+                        continue
+
                     building.spawn_timer += dt
                     spawn_interval = 10.0 / building.template.level
                     
@@ -741,8 +764,8 @@ class CombatManager:
                             speed=60
                         )
                         self.ground_units.append(defender)
+                        current_defenders += 1 # Increment local count to prevent overspawn in same frame
                         building.spawn_timer = 0
-                        # self.state.add_log("Defender Deployed") # Too spammy?
 
     def update_turrets(self, dt):
         """Turrets acquire and fire at enemies"""
@@ -760,9 +783,10 @@ class CombatManager:
                     turret_x = GRID_START_X + building.column * GRID_SLOT_WIDTH + (width * GRID_SLOT_WIDTH) / 2
                     turret_y = GROUND_Y - building.row * GRID_CELL_HEIGHT - (height * GRID_CELL_HEIGHT) / 2
                     
-                    target = self.find_nearest_enemy(turret_x, turret_y)
+                    # Use building range
+                    target = self.find_nearest_enemy(turret_x, turret_y, max_range=building.template.range)
                     if target:
-                        self.fire_projectile(turret_x, turret_y, target)
+                        self.fire_projectile(turret_x, turret_y, target, damage=building.template.damage)
                         building.cooldown = 1.0
     
     def find_nearest_enemy(self, x, y, max_range=600):
@@ -778,7 +802,7 @@ class CombatManager:
         
         return nearest
     
-    def fire_projectile(self, from_x, from_y, target):
+    def fire_projectile(self, from_x, from_y, target, damage=25):
         """Create projectile aimed at target"""
         dx = target.x - from_x
         dy = target.y - from_y
@@ -796,7 +820,7 @@ class CombatManager:
             y=from_y,
             vx=vx,
             vy=vy,
-            damage=25,
+            damage=damage,
             target=target
         )
         self.projectiles.append(projectile)

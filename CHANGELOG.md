@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.9] - 2025-11-24
+
+### Added
+- **HUD Improvements**:
+  - **Detailed Stats**: The HUD now displays **Turret Damage**, **Turret Range**, and **Barracks Capacity** when a building is selected.
+  - **Shield Regen**: Added Shield Regeneration Rate (per second) to the Economy stats panel.
+  - **Range Indicators**: Selecting a Turret in Build Mode now draws a red circle indicating its attack range.
+- **Combat Logic**:
+  - **Barracks Capacity**: Implemented a global capacity check for Defenders. Barracks will stop spawning units if the total number of active Defenders exceeds the total capacity of all Barracks.
+
+### Changed
+- **UI/UX**:
+  - **Cursor Visibility**: The grid selection cursor is now hidden during the Combat Phase to reduce visual clutter.
+
 ## [0.2.8] - 2025-11-24
 
 ### Fixed
