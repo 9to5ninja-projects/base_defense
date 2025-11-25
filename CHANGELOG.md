@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.19] - 2025-11-25
+
+### Added
+- **Drones**:
+  - **Drone Factory**: New building type that produces Drones.
+    - **Cost**: 130 Credits.
+    - **Energy**: -8.
+    - **Capacity**: 2 Drones (Scales with level).
+  - **Drone Units**: Aerial interceptors that act as "Mobile Turrets".
+    - **Behavior**: Hover near their factory when idle, fly out to intercept enemies within range (800px).
+    - **Combat**: Maintain distance from targets and fire rapid, low-damage projectiles.
+    - **Stats**: Fast movement (150 px/s), rapid fire (0.8s cooldown), low damage (8).
+- **UI/UX**:
+  - **HUD**: Added "Drones" count to the Combat Status panel.
+  - **Visuals**: Drones render as small Cyan triangles with HP bars.
+
 ## [0.2.18] - 2025-11-25
 
 ### Added

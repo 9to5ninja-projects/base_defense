@@ -509,6 +509,7 @@ class Game:
             if self.state.phase == "combat":
                 self.draw_enemies()
                 self.draw_ground_units()
+                self.draw_drones()
                 self.draw_projectiles()
             
             self.draw_hud()
@@ -628,6 +629,26 @@ class Game:
             pygame.draw.rect(self.screen, GREEN,
                            (enemy.x - enemy.radius, enemy.y - enemy.radius - (bar_height + 4), bar_width * hp_ratio, bar_height))
     
+    def draw_drones(self):
+        """Draw active drones"""
+        for drone in self.state.combat.drones:
+            if not drone.alive:
+                continue
+            
+            # Draw Drone body (Cyan Triangle)
+            # Points: Top, BottomLeft, BottomRight
+            size = 8
+            points = [
+                (drone.x, drone.y - size),
+                (drone.x - size, drone.y + size),
+                (drone.x + size, drone.y + size)
+            ]
+            pygame.draw.polygon(self.screen, (0, 255, 255), points)
+            
+            # HP Bar (Tiny)
+            hp_ratio = drone.hp / drone.max_hp
+            pygame.draw.rect(self.screen, GREEN, (drone.x - 8, drone.y - 12, 16 * hp_ratio, 2))
+
     def draw_projectiles(self):
         """Draw all active projectiles"""
         for proj in self.state.combat.projectiles:
@@ -708,12 +729,15 @@ class Game:
             # Count ground units
             invaders = sum(1 for u in self.state.combat.ground_units if u.team == "invader" and u.alive)
             defenders = sum(1 for u in self.state.combat.ground_units if u.team == "defender" and u.alive)
+            drones = len(self.state.combat.drones)
             
             self.screen.blit(self.font.render(f"Aerial Enemies: {len(self.state.combat.enemies)}", True, WHITE), (x, y))
             y += 20
             self.screen.blit(self.font.render(f"Ground Invaders: {invaders}", True, RED), (x, y))
             y += 20
             self.screen.blit(self.font.render(f"Defenders: {defenders}", True, BLUE), (x, y))
+            y += 20
+            self.screen.blit(self.font.render(f"Drones: {drones}", True, (0, 255, 255)), (x, y))
             y += 20
             self.screen.blit(self.font.render(f"Incoming: {self.state.combat.current_wave.enemies_remaining}", True, WHITE), (x, y))
             y += 20
@@ -857,6 +881,7 @@ class Game:
             if template.shield_recharge_bonus > 0: stats.append(f"Rchrg: +{template.shield_recharge_bonus:.1f}")
             if building_type == BuildingType.TURRET: stats.append(f"Dmg: {template.damage}")
             if building_type == BuildingType.BARRACKS: stats.append("Spawns Defenders")
+            if building_type == BuildingType.DRONE_FACTORY: stats.append(f"Cap: {template.capacity} Drones")
             
             stats_text = " | ".join(stats)
             

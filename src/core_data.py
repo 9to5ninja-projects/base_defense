@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Tuple, Set, Dict
 from enum import Enum
 import random
+import math
 
 class BuildingType(Enum):
     POWER_PLANT = "power_plant"
@@ -126,10 +127,11 @@ def get_building_template(building_type: BuildingType, level: int) -> BuildingTe
             'shield_hp_bonus': 0,
             'shield_recharge_bonus': 0,
             'cost': 130,
-            'upgrade_cost': 0,  # Cannot upgrade
-            'damage': 0,
-            'range': 0,
-            'capacity': 0,
+            'upgrade_cost': 100,
+            'damage': 8,
+            'range': 200,
+            'capacity': 2,
+            'cooldown': 0.8,
         },
         BuildingType.BARRACKS: {
             'max_hp': 200,
@@ -581,6 +583,23 @@ class GroundUnit:
     alive: bool = True
 
 @dataclass
+class Drone:
+    x: float
+    y: float
+    vx: float
+    vy: float
+    hp: int
+    max_hp: int
+    damage: int
+    range: int
+    speed: float
+    home_x: float
+    home_y: float
+    target: Optional['Enemy'] = None
+    cooldown: float = 0.0
+    alive: bool = True
+
+@dataclass
 class Enemy:
     x: float
     y: float  # starts above shield
@@ -625,6 +644,7 @@ class CombatManager:
         self.enemies: List[Enemy] = []
         self.projectiles: List[Projectile] = []
         self.ground_units: List[GroundUnit] = []
+        self.drones: List[Drone] = []
         self.current_wave: Optional[Wave] = None
         self.wave_complete_timer: float = 0
         self.damage_taken_this_wave: bool = False
@@ -644,6 +664,7 @@ class CombatManager:
         self.enemies.clear()
         self.projectiles.clear()
         self.ground_units.clear()
+        self.drones.clear()
         
     def spawn_boss(self):
         """Spawn the Giant Kamikaze Boss"""
@@ -720,6 +741,9 @@ class CombatManager:
         
         # Barracks produce
         self.update_barracks(dt)
+
+        # Drone Factories produce and Drones act
+        self.update_drones(dt)
         
         # Update projectiles
         self.update_projectiles(dt)
@@ -731,6 +755,7 @@ class CombatManager:
         self.enemies = [e for e in self.enemies if e.alive]
         self.projectiles = [p for p in self.projectiles if p.alive]
         self.ground_units = [u for u in self.ground_units if u.alive]
+        self.drones = [d for d in self.drones if d.alive]
         
         # Check wave completion
         invaders_alive = any(u.team == "invader" and u.alive for u in self.ground_units)
@@ -1027,6 +1052,109 @@ class CombatManager:
                         unit.alive = False
                     else:
                         unit.x += move_amount
+
+    def update_drones(self, dt):
+        """Handle Drone Factory production and Drone behavior"""
+        # 1. Production
+        # Count drones per factory? Or just global pool for simplicity first?
+        # Let's do global pool limit based on total capacity
+        total_capacity = sum(b.template.capacity for b in self.state.grid.buildings if b.template.type == BuildingType.DRONE_FACTORY)
+        current_drones = len(self.drones)
+        
+        for building in self.state.grid.buildings:
+            if building.template.type == BuildingType.DRONE_FACTORY:
+                if self.state.energy_surplus >= 0:
+                    if current_drones >= total_capacity:
+                        continue
+                        
+                    building.spawn_timer += dt
+                    spawn_interval = 5.0 # Fast production
+                    
+                    if building.spawn_timer >= spawn_interval:
+                        # Spawn Drone
+                        width, height = building.template.footprint
+                        bx = GRID_START_X + building.column * GRID_SLOT_WIDTH + (width * GRID_SLOT_WIDTH / 2)
+                        by = GROUND_Y - building.row * GRID_CELL_HEIGHT - (height * GRID_CELL_HEIGHT)
+                        
+                        drone = Drone(
+                            x=bx,
+                            y=by - 20, # Spawn slightly above
+                            vx=0,
+                            vy=0,
+                            hp=30 * building.template.level,
+                            max_hp=30 * building.template.level,
+                            damage=building.template.damage,
+                            range=building.template.range,
+                            speed=150,
+                            home_x=bx,
+                            home_y=by - 50 # Hover point
+                        )
+                        self.drones.append(drone)
+                        current_drones += 1
+                        building.spawn_timer = 0
+        
+        # 2. Behavior
+        for drone in self.drones:
+            if not drone.alive:
+                continue
+                
+            # Cooldown
+            if drone.cooldown > 0:
+                drone.cooldown -= dt
+            
+            # Find Target
+            if not drone.target or not drone.target.alive:
+                drone.target = self.find_nearest_enemy(drone.x, drone.y, max_range=800) # Wide search
+            
+            target_x, target_y = drone.home_x, drone.home_y
+            
+            if drone.target:
+                # Move towards target
+                # Ideal distance: keep at ~80% of range
+                ideal_dist = drone.range * 0.8
+                dx = drone.target.x - drone.x
+                dy = drone.target.y - drone.y
+                dist = (dx**2 + dy**2)**0.5
+                
+                if dist > 0:
+                    if dist > ideal_dist:
+                        # Close in
+                        drone.vx = (dx / dist) * drone.speed
+                        drone.vy = (dy / dist) * drone.speed
+                    elif dist < ideal_dist * 0.5:
+                        # Back off
+                        drone.vx = -(dx / dist) * drone.speed
+                        drone.vy = -(dy / dist) * drone.speed
+                    else:
+                        # Strafe / Hover (simple: stop)
+                        drone.vx = 0
+                        drone.vy = 0
+                        
+                    # Fire if in range
+                    if dist <= drone.range and drone.cooldown <= 0:
+                        self.fire_projectile(drone.x, drone.y, drone.target, 
+                                           damage=drone.damage, 
+                                           max_range=drone.range * 1.5,
+                                           speed=400) # Fast drone shots
+                        drone.cooldown = 0.8
+            else:
+                # Return home
+                dx = drone.home_x - drone.x
+                dy = drone.home_y - drone.y
+                dist = (dx**2 + dy**2)**0.5
+                
+                if dist > 5:
+                    drone.vx = (dx / dist) * drone.speed
+                    drone.vy = (dy / dist) * drone.speed
+                else:
+                    drone.vx = 0
+                    drone.vy = 0
+                    # Idle hover effect?
+                    drone.y += math.sin(self.state.combat.wave_complete_timer * 5) * 0.5 # Hacky access to timer
+            
+            # Apply movement
+            drone.x += drone.vx * dt
+            drone.y += drone.vy * dt
 
     def update_barracks(self, dt):
         """Handle Barracks production"""
