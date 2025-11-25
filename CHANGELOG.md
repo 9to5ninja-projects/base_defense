@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.8] - 2025-11-24
+
+### Fixed
+- **Wave Completion**: Fixed a bug where the wave would not end if friendly Defenders were still alive. The wave now correctly ends when all Aerial Enemies and Ground Invaders are defeated.
+- **Collision Detection**: 
+  - Fixed aerial enemy collision logic to check the full width of the enemy against buildings, ensuring wide enemies don't "miss" buildings by having their center point in an empty column.
+
 ## [0.2.7] - 2025-11-24
 
 ### Changed

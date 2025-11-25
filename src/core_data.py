@@ -561,7 +561,8 @@ class CombatManager:
         self.ground_units = [u for u in self.ground_units if u.alive]
         
         # Check wave completion
-        if self.current_wave.enemies_remaining == 0 and len(self.enemies) == 0 and len(self.ground_units) == 0:
+        invaders_alive = any(u.team == "invader" and u.alive for u in self.ground_units)
+        if self.current_wave.enemies_remaining == 0 and len(self.enemies) == 0 and not invaders_alive:
             self.wave_complete_timer += dt
             if self.wave_complete_timer >= 2.0:  # 2 second delay before build phase
                 self.end_wave()
@@ -855,25 +856,40 @@ class CombatManager:
                 
             if enemy.y < SHIELD_Y:
                 continue
-                
-            col = int((enemy.x - GRID_START_X) / GRID_SLOT_WIDTH)
-            if 0 <= col < self.state.grid.max_columns:
+            
+            # Check collision with buildings across enemy width
+            check_points = [enemy.x, enemy.x - enemy.radius, enemy.x + enemy.radius]
+            checked_cols = set()
+            
+            for check_x in check_points:
+                col = int((check_x - GRID_START_X) / GRID_SLOT_WIDTH)
+                if 0 <= col < self.state.grid.max_columns:
+                    checked_cols.add(col)
+            
+            hit_building = None
+            for col in checked_cols:
                 for building in self.state.grid.buildings:
                     width, height = building.template.footprint
+                    # Check if building occupies this column
                     if building.column <= col < building.column + width:
                         building_y_top = GROUND_Y - (building.row + height) * GRID_CELL_HEIGHT
                         building_y_bottom = GROUND_Y - building.row * GRID_CELL_HEIGHT
                         
                         if building_y_top <= enemy.y <= building_y_bottom:
-                            building.current_hp -= enemy.damage
-                            self.state.add_log(f"{building.template.type.value} hit! -{enemy.damage} HP")
-                            enemy.alive = False
-                            
-                            if building.current_hp <= 0:
-                                self.state.grid.destroy_building(building.id)
-                                self.state.update_economy()
-                                self.state.add_log(f"{building.template.type.value} DESTROYED!")
+                            hit_building = building
                             break
+                if hit_building:
+                    break
+            
+            if hit_building:
+                hit_building.current_hp -= enemy.damage
+                self.state.add_log(f"{hit_building.template.type.value} hit! -{enemy.damage} HP")
+                enemy.alive = False
+                
+                if hit_building.current_hp <= 0:
+                    self.state.grid.destroy_building(hit_building.id)
+                    self.state.update_economy()
+                    self.state.add_log(f"{hit_building.template.type.value} DESTROYED!")
     
     def end_wave(self):
         """Transition back to build phase"""
