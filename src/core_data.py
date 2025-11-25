@@ -24,6 +24,7 @@ class BuildingTemplate:
     upgrade_cost: int  # cost to level up
     damage: int = 0
     range: int = 0
+    ammo_range: int = 0
     capacity: int = 0
     
     @property
@@ -109,9 +110,10 @@ def get_building_template(building_type: BuildingType, level: int) -> BuildingTe
             'shield_hp_bonus': 0,
             'shield_recharge_bonus': 0,
             'cost': 80,
-            'upgrade_cost': 0,  # Cannot upgrade
-            'damage': 25,
-            'range': 600,
+            'upgrade_cost': 60,
+            'damage': 10,
+            'range': 300,
+            'ammo_range': 450,
             'capacity': 0,
         },
         BuildingType.DRONE_FACTORY: {
@@ -145,6 +147,79 @@ def get_building_template(building_type: BuildingType, level: int) -> BuildingTe
     # Scale stats by level
     scale = 1 + (level - 1) * 0.3  # 30% increase per level
     
+    # Calculate range scaling
+    calc_range = int(base['range'] * (1 + (level - 1) * 0.1))
+    
+    # Calculate ammo range scaling
+    # Basic Turret: Ammo range is 1.5x targeting range (starts at 300/450)
+    calc_ammo_range = base.get('ammo_range', 0)
+    if building_type == BuildingType.TURRET:
+        # Define explicit stats for Basic Turret Tiers
+        # Tier 1 (Levels 1-3): Standard
+        # Tier 2 (Levels 4-6): High Velocity (Range+)
+        # Tier 3 (Levels 7-9): Heavy Caliber (Damage+)
+        
+        tier = 1
+        if level > 6: tier = 3
+        elif level > 3: tier = 2
+        
+        if tier == 1:
+            # Levels 1-3: Linear scaling
+            # Lvl 1: 10 dmg, 300 rng
+            # Lvl 2: 13 dmg, 330 rng
+            # Lvl 3: 16 dmg, 360 rng
+            pass # Use default scaling below
+            
+        elif tier == 2:
+            # Levels 4-6: Range Boost
+            # Base for Tier 2 (Level 4)
+            # Lvl 4: 25 dmg, 450 rng
+            base_dmg = 25
+            base_rng = 450
+            lvl_offset = level - 4
+            
+            return BuildingTemplate(
+                type=building_type,
+                level=level,
+                max_hp=int(base['max_hp'] * scale),
+                energy_production=0,
+                energy_consumption=int(base['energy_consumption'] * scale),
+                shield_hp_bonus=0,
+                shield_recharge_bonus=0,
+                cost=base['cost'],
+                upgrade_cost=int(base['upgrade_cost'] * scale),
+                damage=int(base_dmg + (lvl_offset * 5)),
+                range=int(base_rng + (lvl_offset * 30)),
+                ammo_range=int((base_rng + (lvl_offset * 30)) * 1.5),
+                capacity=0
+            )
+            
+        elif tier == 3:
+            # Levels 7-9: Damage Boost
+            # Base for Tier 3 (Level 7)
+            # Lvl 7: 50 dmg, 600 rng
+            base_dmg = 50
+            base_rng = 600
+            lvl_offset = level - 7
+            
+            return BuildingTemplate(
+                type=building_type,
+                level=level,
+                max_hp=int(base['max_hp'] * scale),
+                energy_production=0,
+                energy_consumption=int(base['energy_consumption'] * scale),
+                shield_hp_bonus=0,
+                shield_recharge_bonus=0,
+                cost=base['cost'],
+                upgrade_cost=int(base['upgrade_cost'] * scale),
+                damage=int(base_dmg + (lvl_offset * 10)),
+                range=int(base_rng + (lvl_offset * 20)),
+                ammo_range=int((base_rng + (lvl_offset * 20)) * 1.5),
+                capacity=0
+            )
+
+        calc_ammo_range = int(calc_range * 1.5)
+
     return BuildingTemplate(
         type=building_type,
         level=level,
@@ -154,9 +229,10 @@ def get_building_template(building_type: BuildingType, level: int) -> BuildingTe
         shield_hp_bonus=int(base['shield_hp_bonus'] * scale),
         shield_recharge_bonus=base['shield_recharge_bonus'] * scale,
         cost=base['cost'],
-        upgrade_cost=base['upgrade_cost'],
+        upgrade_cost=int(base['upgrade_cost'] * scale),
         damage=int(base['damage'] * scale),
-        range=int(base['range'] * (1 + (level - 1) * 0.1)), # Range scales slower (10%)
+        range=calc_range,
+        ammo_range=calc_ammo_range,
         capacity=int(base['capacity'] * level), # Capacity scales linearly with level (2, 4, 6...)
     )
 
@@ -243,6 +319,10 @@ class CityGrid:
         if not building:
             return False, "Building not found"
             
+        # Check if same position (No-op)
+        if new_col == building.column and new_row == building.row:
+            return True, "No change"
+            
         # Check if supporting anything
         if self.is_supporting_others(building):
              return False, "Cannot move: Supporting other buildings"
@@ -325,6 +405,13 @@ class CityGrid:
             if not (left_vacant or right_vacant):
                 return False, "Datacenter needs vacant neighbor column"
         
+        # Special rule: Power Plant placement
+        if building_type == BuildingType.POWER_PLANT:
+            if row > 0:
+                below_building = self.get_building_at(column, row - 1)
+                if not below_building or below_building.template.type != BuildingType.POWER_PLANT:
+                    return False, "Power Plants must be on Ground or other Power Plants"
+
         # Special rule: Barracks placement
         if building_type == BuildingType.BARRACKS:
             if row > 0:
@@ -452,13 +539,20 @@ class CityGrid:
         return None
 
 # --- Constants ---
-GRID_START_X = 50
-GRID_SLOT_WIDTH = 40
-GRID_CELL_HEIGHT = 40
-GROUND_Y = 620  # Moved down to make room for log
-SHIELD_Y = 300  # Lowered slightly
 SCREEN_WIDTH = 1600
 SCREEN_HEIGHT = 720
+UI_WIDTH = 300
+GRID_SLOT_WIDTH = 40
+GRID_CELL_HEIGHT = 40
+MAX_COLS = 32
+
+# Calculate centered grid position
+GRID_WIDTH = MAX_COLS * GRID_SLOT_WIDTH
+PLAYABLE_WIDTH = SCREEN_WIDTH - UI_WIDTH
+GRID_START_X = (PLAYABLE_WIDTH - GRID_WIDTH) // 2  # Should be 10
+
+GROUND_Y = 620  # Moved down to make room for log
+SHIELD_Y = 300  # Lowered slightly
 
 @dataclass
 class GroundUnit:
@@ -482,9 +576,10 @@ class Enemy:
     max_hp: int = 50
     current_hp: int = 50
     damage: int = 20  # damage on impact
-    radius: int = 15
+    radius: int = 20
     behavior: str = "kamikaze"  # or "shooter" later
     alive: bool = True
+    is_boss: bool = False
 
 @dataclass
 class Projectile:
@@ -497,6 +592,8 @@ class Projectile:
     alive: bool = True
     source: str = "turret"  # or "enemy"
     target: Optional[Enemy] = None
+    max_range: float = 0
+    distance_traveled: float = 0
 
 @dataclass
 class Wave:
@@ -526,14 +623,45 @@ class CombatManager:
         )
         self.current_wave.enemies_remaining = self.current_wave.get_spawn_count()
         
+        if self.state.wave % 10 == 0:
+            self.state.add_log("WARNING: MASSIVE SIGNAL DETECTED!")
+        
         self.enemies.clear()
         self.projectiles.clear()
         self.ground_units.clear()
         
+    def spawn_boss(self):
+        """Spawn the Giant Kamikaze Boss"""
+        # Center spawn
+        x = GRID_START_X + (self.state.grid.max_columns * GRID_SLOT_WIDTH) / 2
+        
+        # Scale stats
+        boss_tier = max(1, self.state.wave // 10)
+        hp = 2000 * boss_tier
+        
+        boss = Enemy(
+            x=x,
+            y=-100,
+            vx=0,
+            vy=15, # Very slow
+            max_hp=hp,
+            current_hp=hp,
+            damage=1000, # Instakill
+            radius=60, # Giant
+            behavior="boss",
+            is_boss=True
+        )
+        self.enemies.append(boss)
+        self.state.add_log(f"BOSS INCOMING: GIANT KAMIKAZE (Tier {boss_tier})!")
+
     def spawn_enemy(self):
         """Spawn a single enemy at random x position"""
         start, end = self.state.grid.unlocked_range
-        slot = random.randint(start, end - 1)
+        # Allow spawning slightly outside unlocked range for variance
+        spawn_start = max(0, start - 2)
+        spawn_end = min(self.state.grid.max_columns, end + 2)
+        
+        slot = random.randint(spawn_start, spawn_end - 1)
         x = GRID_START_X + slot * GRID_SLOT_WIDTH + GRID_SLOT_WIDTH / 2
         
         # Scale HP with wave number
@@ -557,7 +685,12 @@ class CombatManager:
         if self.current_wave.enemies_remaining > 0:
             self.current_wave.spawn_timer += dt
             if self.current_wave.spawn_timer >= self.current_wave.spawn_interval:
-                self.spawn_enemy()
+                # Check for Boss Spawn (Last enemy of every 10th wave)
+                if self.state.wave % 10 == 0 and self.current_wave.enemies_remaining == 1:
+                    self.spawn_boss()
+                else:
+                    self.spawn_enemy()
+                    
                 self.current_wave.enemies_remaining -= 1
                 self.current_wave.spawn_timer = 0
         
@@ -587,45 +720,94 @@ class CombatManager:
         # Check wave completion
         invaders_alive = any(u.team == "invader" and u.alive for u in self.ground_units)
         if self.current_wave.enemies_remaining == 0 and len(self.enemies) == 0 and not invaders_alive:
+            # Prevent wave completion if base is destroyed
+            if not self.state.grid.buildings:
+                return
+
             self.wave_complete_timer += dt
             if self.wave_complete_timer >= 2.0:  # 2 second delay before build phase
                 self.end_wave()
     
+    def explode_enemy(self, enemy, x, y):
+        """Handle enemy explosion with AOE damage"""
+        blast_radius = 50  # Approx 50-100 range diameter
+        if enemy.is_boss:
+            blast_radius = 200 # Massive area for boss
+            self.state.add_log("BOSS DETONATED! CATASTROPHIC DAMAGE!")
+            
+        damage = enemy.damage
+        
+        # Find all buildings in radius
+        hit_buildings = []
+        for building in self.state.grid.buildings:
+            # Building rect
+            bx = GRID_START_X + building.column * GRID_SLOT_WIDTH
+            by = GROUND_Y - (building.row + building.template.footprint[1]) * GRID_CELL_HEIGHT
+            bw = building.template.footprint[0] * GRID_SLOT_WIDTH
+            bh = building.template.footprint[1] * GRID_CELL_HEIGHT
+            
+            # Closest point on rect to circle center
+            closest_x = max(bx, min(x, bx + bw))
+            closest_y = max(by, min(y, by + bh))
+            
+            dist_sq = (x - closest_x)**2 + (y - closest_y)**2
+            if dist_sq < blast_radius**2:
+                hit_buildings.append(building)
+        
+        if hit_buildings:
+            self.state.add_log(f"Enemy exploded! Hit {len(hit_buildings)} buildings.")
+            for building in hit_buildings:
+                building.current_hp -= damage
+                if building.current_hp <= 0:
+                    self.state.grid.destroy_building(building.id)
+            self.state.update_economy()
+        
+        enemy.alive = False
+
     def update_enemies(self, dt):
         """Move enemies toward city"""
         for enemy in self.enemies:
+            prev_y = enemy.y
             enemy.y += enemy.vy * dt
             
-            # Check if enemy reached ground (destroy bottom building)
+            # Check for collision with buildings along the path (Raycast)
+            hit_building = None
+            for building in self.state.grid.buildings:
+                bx = GRID_START_X + building.column * GRID_SLOT_WIDTH
+                by = GROUND_Y - (building.row + building.template.footprint[1]) * GRID_CELL_HEIGHT
+                bw = building.template.footprint[0] * GRID_SLOT_WIDTH
+                bh = building.template.footprint[1] * GRID_CELL_HEIGHT
+                
+                # Check X overlap (including radius)
+                if not (bx - enemy.radius <= enemy.x <= bx + bw + enemy.radius):
+                    continue
+                    
+                # Check Y overlap (path vs building height)
+                # Building Y range: [by, by + bh]
+                # Enemy Y path: [prev_y, enemy.y]
+                if (prev_y < by + bh and enemy.y > by):
+                    hit_building = building
+                    break
+            
+            if hit_building:
+                self.explode_enemy(enemy, enemy.x, enemy.y)
+                continue
+            
+            # Check if enemy reached ground
             if enemy.y >= GROUND_Y:
-                # Check for collision with any building at ground level
-                hit_building = None
+                # Check for direct hit on ground level building to decide on invaders
+                direct_hit = False
+                col = int((enemy.x - GRID_START_X) / GRID_SLOT_WIDTH)
+                if 0 <= col < self.state.grid.max_columns:
+                     if self.state.grid.get_building_at(col, 0):
+                         direct_hit = True
                 
-                # Check a small range around the enemy center to account for width
-                # Enemy radius is 15. Grid slot is 40.
-                # We check the column at center, left edge, and right edge
-                check_points = [enemy.x, enemy.x - enemy.radius, enemy.x + enemy.radius]
+                # Explode (AOE)
+                self.explode_enemy(enemy, enemy.x, GROUND_Y)
                 
-                for check_x in check_points:
-                    col = int((check_x - GRID_START_X) / GRID_SLOT_WIDTH)
-                    if 0 <= col < self.state.grid.max_columns:
-                        building = self.state.grid.get_building_at(col, 0)
-                        if building:
-                            hit_building = building
-                            break
-                
-                if hit_building:
-                    hit_building.current_hp -= enemy.damage
-                    self.state.add_log(f"Enemy crashed into {hit_building.template.type.value}!")
-                    if hit_building.current_hp <= 0:
-                        self.state.grid.destroy_building(hit_building.id)
-                        self.state.update_economy()
-                else:
-                    # Hit empty ground - Spawn Invaders
-                    # Spawn 2 invaders per crasher
+                # If no direct hit on a building, spawn invaders
+                if not direct_hit:
                     self.spawn_ground_invader(enemy.x, count=2)
-                        
-                enemy.alive = False
 
     def spawn_ground_invader(self, x, count=1):
         """Spawn invader ground units"""
@@ -687,6 +869,47 @@ class CombatManager:
                             min_dist = dist
                             target = other
             
+    def update_ground_units(self, dt):
+        """Update movement and combat for ground units"""
+        for unit in self.ground_units:
+            if not unit.alive:
+                continue
+                
+            if unit.attack_cooldown > 0:
+                unit.attack_cooldown -= dt
+            
+            # Find target
+            target = None
+            if unit.team == "invader":
+                # Target nearest building OR defender
+                min_dist = 9999
+                
+                # Check buildings
+                for b in self.state.grid.buildings:
+                    bx = GRID_START_X + b.column * GRID_SLOT_WIDTH + (b.template.footprint[0] * GRID_SLOT_WIDTH / 2)
+                    dist = abs(unit.x - bx)
+                    if dist < min_dist:
+                        min_dist = dist
+                        target = b
+                
+                # Check defenders
+                for other in self.ground_units:
+                    if other.team == "defender" and other.alive:
+                        dist = abs(unit.x - other.x)
+                        if dist < min_dist:
+                            min_dist = dist
+                            target = other
+                            
+            else: # defender
+                # Target nearest invader
+                min_dist = 9999
+                for other in self.ground_units:
+                    if other.team == "invader" and other.alive:
+                        dist = abs(unit.x - other.x)
+                        if dist < min_dist:
+                            min_dist = dist
+                            target = other
+            
             if target:
                 # Move or Attack
                 target_x = 0
@@ -695,29 +918,53 @@ class CombatManager:
                 else:
                     target_x = target.x
                 
-                dist = abs(unit.x - target_x)
+                # Determine direction
+                direction = 1 if target_x > unit.x else -1
+                
+                # Check for collision/attack range
                 attack_range = 15 if unit.team == "invader" else 30
                 
+                # For Invaders vs Buildings, use physical collision check instead of center-to-center distance
+                hit_building = None
+                if unit.team == "invader":
+                    unit_left = unit.x - 5
+                    unit_right = unit.x + 5
+                    
+                    # Check if touching any building
+                    for building in self.state.grid.buildings:
+                        if building.row == 0: # Only ground level
+                            bx = GRID_START_X + building.column * GRID_SLOT_WIDTH
+                            bw = building.template.footprint[0] * GRID_SLOT_WIDTH
+                            
+                            # Check overlap
+                            if unit_right >= bx and unit_left <= bx + bw:
+                                hit_building = building
+                                break
+                
+                if hit_building:
+                    # Explode on contact
+                    damage = unit.hp
+                    hit_building.current_hp -= damage
+                    self.state.add_log(f"Invader crashed into building! -{damage} HP")
+                    if hit_building.current_hp <= 0:
+                        self.state.grid.destroy_building(hit_building.id)
+                        self.state.update_economy()
+                    unit.alive = False
+                    continue
+
+                # Standard distance check for other targets
+                dist = abs(unit.x - target_x)
                 if dist <= attack_range:
                     # Attack
                     if unit.attack_cooldown <= 0:
                         if unit.team == "invader":
-                            # Kamikaze behavior: Explode dealing HP as damage
-                            damage = unit.hp
-                            
-                            if isinstance(target, Building):
-                                target.current_hp -= damage
-                                self.state.add_log(f"Invader exploded! -{damage} HP to Building")
-                                if target.current_hp <= 0:
-                                    self.state.grid.destroy_building(target.id)
-                                    self.state.update_economy()
-                            else:
-                                target.hp -= damage
-                                self.state.add_log(f"Invader exploded! -{damage} HP to Defender")
+                            # Should be handled by collision above if building, but handle defenders here
+                            if not isinstance(target, Building):
+                                target.hp -= unit.hp
+                                self.state.add_log(f"Invader exploded! -{unit.hp} HP to Defender")
                                 if target.hp <= 0:
                                     target.alive = False
-                            
-                            unit.alive = False # Self destruct
+                                unit.alive = False
                         else:
                             # Defender behavior: Standard shooting/melee
                             if isinstance(target, Building):
@@ -730,8 +977,38 @@ class CombatManager:
                             unit.attack_cooldown = 1.0
                 else:
                     # Move
-                    direction = 1 if target_x > unit.x else -1
-                    unit.x += direction * unit.speed * dt
+                    move_amount = direction * unit.speed * dt
+                    
+                    # Check for collision with buildings if moving (Predictive)
+                    will_hit_building = False
+                    if unit.team == "invader":
+                        next_x = unit.x + move_amount
+                        next_left = next_x - 5
+                        next_right = next_x + 5
+                        
+                        for building in self.state.grid.buildings:
+                            if building.row == 0:
+                                bx = GRID_START_X + building.column * GRID_SLOT_WIDTH
+                                bw = building.template.footprint[0] * GRID_SLOT_WIDTH
+                                
+                                if next_right >= bx and next_left <= bx + bw:
+                                    will_hit_building = True
+                                    # We will hit it next frame, so just move to edge and let next frame handle collision?
+                                    # Or explode now? Let's explode now to be responsive.
+                                    hit_building = building
+                                    break
+                    
+                    if hit_building:
+                         # Explode on contact (Predictive)
+                        damage = unit.hp
+                        hit_building.current_hp -= damage
+                        self.state.add_log(f"Invader crashed into building! -{damage} HP")
+                        if hit_building.current_hp <= 0:
+                            self.state.grid.destroy_building(hit_building.id)
+                            self.state.update_economy()
+                        unit.alive = False
+                    else:
+                        unit.x += move_amount
 
     def update_barracks(self, dt):
         """Handle Barracks production"""
@@ -750,6 +1027,11 @@ class CombatManager:
                     spawn_interval = 10.0 / building.template.level
                     
                     if building.spawn_timer >= spawn_interval:
+                        # Check cost
+                        if self.state.credits < 1:
+                            # Not enough credits to spawn
+                            continue
+
                         # Spawn defender
                         width = building.template.footprint[0]
                         bx = GRID_START_X + building.column * GRID_SLOT_WIDTH + (width * GRID_SLOT_WIDTH / 2)
@@ -766,6 +1048,7 @@ class CombatManager:
                         self.ground_units.append(defender)
                         current_defenders += 1 # Increment local count to prevent overspawn in same frame
                         building.spawn_timer = 0
+                        self.state.credits -= 1 # Cost 1 credit per unit
 
     def update_turrets(self, dt):
         """Turrets acquire and fire at enemies"""
@@ -786,7 +1069,7 @@ class CombatManager:
                     # Use building range
                     target = self.find_nearest_enemy(turret_x, turret_y, max_range=building.template.range)
                     if target:
-                        self.fire_projectile(turret_x, turret_y, target, damage=building.template.damage)
+                        self.fire_projectile(turret_x, turret_y, target, damage=building.template.damage, max_range=building.template.ammo_range)
                         building.cooldown = 1.0
     
     def find_nearest_enemy(self, x, y, max_range=600):
@@ -802,7 +1085,7 @@ class CombatManager:
         
         return nearest
     
-    def fire_projectile(self, from_x, from_y, target, damage=25):
+    def fire_projectile(self, from_x, from_y, target, damage=25, max_range=0):
         """Create projectile aimed at target"""
         dx = target.x - from_x
         dy = target.y - from_y
@@ -821,7 +1104,8 @@ class CombatManager:
             vx=vx,
             vy=vy,
             damage=damage,
-            target=target
+            target=target,
+            max_range=max_range
         )
         self.projectiles.append(projectile)
     
@@ -830,6 +1114,13 @@ class CombatManager:
         for proj in self.projectiles:
             proj.x += proj.vx * dt
             proj.y += proj.vy * dt
+            
+            # Track distance
+            dist_step = (proj.vx**2 + proj.vy**2)**0.5 * dt
+            proj.distance_traveled += dist_step
+            
+            if proj.max_range > 0 and proj.distance_traveled >= proj.max_range:
+                proj.alive = False
             
             if proj.y < 0 or proj.y > SCREEN_HEIGHT or proj.x < 0 or proj.x > SCREEN_WIDTH:
                 proj.alive = False
@@ -877,49 +1168,33 @@ class CombatManager:
         for enemy in self.enemies:
             if not enemy.alive:
                 continue
+            
+            # Check collision with any building
+            hit_any = False
+            for building in self.state.grid.buildings:
+                bx = GRID_START_X + building.column * GRID_SLOT_WIDTH
+                by = GROUND_Y - (building.row + building.template.footprint[1]) * GRID_CELL_HEIGHT
+                bw = building.template.footprint[0] * GRID_SLOT_WIDTH
+                bh = building.template.footprint[1] * GRID_CELL_HEIGHT
                 
-            if enemy.y < SHIELD_Y:
-                continue
-            
-            # Check collision with buildings across enemy width
-            check_points = [enemy.x, enemy.x - enemy.radius, enemy.x + enemy.radius]
-            checked_cols = set()
-            
-            for check_x in check_points:
-                col = int((check_x - GRID_START_X) / GRID_SLOT_WIDTH)
-                if 0 <= col < self.state.grid.max_columns:
-                    checked_cols.add(col)
-            
-            hit_building = None
-            for col in checked_cols:
-                for building in self.state.grid.buildings:
-                    width, height = building.template.footprint
-                    # Check if building occupies this column
-                    if building.column <= col < building.column + width:
-                        building_y_top = GROUND_Y - (building.row + height) * GRID_CELL_HEIGHT
-                        building_y_bottom = GROUND_Y - building.row * GRID_CELL_HEIGHT
-                        
-                        if building_y_top <= enemy.y <= building_y_bottom:
-                            hit_building = building
-                            break
-                if hit_building:
+                # Check circle vs rect
+                closest_x = max(bx, min(enemy.x, bx + bw))
+                closest_y = max(by, min(enemy.y, by + bh))
+                
+                dist_sq = (enemy.x - closest_x)**2 + (enemy.y - closest_y)**2
+                if dist_sq < enemy.radius**2:
+                    hit_any = True
                     break
             
-            if hit_building:
-                hit_building.current_hp -= enemy.damage
-                self.state.add_log(f"{hit_building.template.type.value} hit! -{enemy.damage} HP")
-                enemy.alive = False
-                
-                if hit_building.current_hp <= 0:
-                    self.state.grid.destroy_building(hit_building.id)
-                    self.state.update_economy()
-                    self.state.add_log(f"{hit_building.template.type.value} DESTROYED!")
+            if hit_any:
+                self.explode_enemy(enemy, enemy.x, enemy.y)
     
     def end_wave(self):
         """Transition back to build phase"""
         base_reward = 100 + (self.current_wave.wave_number * 25)
         
         perfect_wave = True
+        
         for building in self.state.grid.buildings:
             if building.current_hp < building.template.max_hp:
                 perfect_wave = False
@@ -938,6 +1213,7 @@ class CombatManager:
             base=base_reward,
             perfect_bonus=perfect_bonus,
             energy_bonus=energy_bonus,
+            repair_cost=0,
             total=total_reward
         )
         
@@ -950,6 +1226,7 @@ class WaveRewards:
     base: int
     perfect_bonus: int
     energy_bonus: int
+    repair_cost: int
     total: int
 
 @dataclass

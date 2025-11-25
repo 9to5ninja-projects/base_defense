@@ -2,18 +2,112 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.16] - 2025-11-25
+
+### Added
+- **Boss Waves**:
+  - **Wave 10 Boss**: Implemented the "Giant Kamikaze" boss which spawns as the final enemy of every 10th wave.
+  - **Boss Stats**:
+    - **HP**: 2000 (Scales with Boss Tier/Wave).
+    - **Speed**: Very slow (15 px/s).
+    - **Size**: Massive (3x normal radius).
+    - **Damage**: 1000 (Instantly destroys most buildings).
+    - **Blast Radius**: 200 (Catastrophic area of effect).
+  - **Visuals**: Boss renders as a large Dark Violet circle with a thicker HP bar.
+
+### Fixed
+- **Turret Progression**:
+  - **Upgrade Cost**: Fixed a bug where Turrets had an upgrade cost of 0, preventing them from leveling up. Set base upgrade cost to 60.
+  - **Upgrade Calculation**: Fixed a bug where the player was charged the *next* level's upgrade cost instead of the current level's cost when upgrading a building.
+- **UI/UX**:
+  - **Upgrade Preview**: The HUD now displays detailed stat changes (Damage, Range, Capacity) when previewing an upgrade.
+
+## [0.2.15] - 2025-11-24
+
+### Added
+- **Boss Waves**:
+  - **Wave 10 Boss**: Implemented the "Giant Kamikaze" boss which spawns as the final enemy of every 10th wave.
+  - **Boss Stats**:
+    - **HP**: 2000 (Scales with Boss Tier/Wave).
+    - **Speed**: Very slow (15 px/s).
+    - **Size**: Massive (3x normal radius).
+    - **Damage**: 1000 (Instantly destroys most buildings).
+    - **Blast Radius**: 200 (Catastrophic area of effect).
+  - **Visuals**: Boss renders as a large Dark Violet circle with a thicker HP bar.
+
+## [0.2.14] - 2025-11-24
+
+### Added
+- **Turret Progression**:
+  - **Tiered Stats**: Implemented distinct stat progression for the Basic Turret across its 3 tiers (Levels 1-9).
+    - **Tier 1 (Lvl 1-3)**: Standard scaling.
+    - **Tier 2 (Lvl 4-6)**: **High Velocity**. Significant jump in Range (450+) and Damage (25+).
+    - **Tier 3 (Lvl 7-9)**: **Heavy Caliber**. Massive jump in Damage (50+) and Range (600+).
+
+## [0.2.13] - 2025-11-24
+
+### Fixed
+- **Visual Sync**:
+  - **Grid Alignment**: Fixed a critical desync between the logical grid position and the visual grid position. The logic assumed the grid started at X=50, while the renderer drew it at X=10 (centered). This caused enemies approaching from the right to hit buildings ~40 pixels (1 cell) before visually touching them.
+  - **Constants**: Centralized layout constants (`GRID_START_X`, `UI_WIDTH`, `MAX_COLS`) in `core_data.py` to ensure logic and rendering always agree.
+
+## [0.2.12] - 2025-11-24
+
+### Fixed
+- **Ground Combat**:
+  - **Collision Physics**: Refined Ground Invader collision detection to use explicit edge-to-edge checking (AABB) rather than center-point checking. Invaders now reliably explode when their leading edge touches a building's wall, preventing them from clipping inside before detonating.
+
+## [0.2.11] - 2025-11-24
+
+### Fixed
+- **Retry Logic**:
+  - **State Restoration**: The "Retry Wave" feature now correctly restores the game state to the **beginning of the Build Phase** (before any buildings were placed or credits spent for that wave), rather than the start of the Combat Phase. This allows players to rethink their strategy completely upon failure.
+- **Ground Combat**:
+  - **Collision Detection**: Ground Invaders now physically collide with buildings they run into, exploding on contact with the building's side walls. Previously, they would only explode if they reached the center point of their target.
+- **UI/UX**:
+  - **Game Over**: Fixed a bug where the "CRITICAL FAILURE" message would spam continuously on the Game Over screen.
+
+## [0.2.10] - 2025-11-24
+
+### Fixed
+- **Collision Physics**:
+  - **Hitbox Improvements**: Completely rewrote enemy collision detection to use a raycast-based system. This prevents fast-moving enemies from "tunneling" through buildings without exploding.
+  - **Blast Radius**: Increased the effective blast radius of Kamikaze enemies to match their visual impact (approx 50-100 range).
+  - **Collision Consistency**: Enemies now reliably explode upon touching any part of a building's footprint, including the top and sides.
+
 ## [0.2.9] - 2025-11-24
 
 ### Added
+- **Economy & Balance**:
+  - **Manual Repair**: Removed auto-repair at the end of waves. Players must now manually repair damaged buildings using the **'R'** key.
+  - **Repair Cost**: Repairing costs **1 Credit per HP**. Partial repairs are allowed if credits are insufficient.
+  - **Repair Bill**: End-of-wave rewards no longer deduct repair costs automatically.
+  - **Unit Production Costs**: Barracks now consume **1 Credit** for every Defender spawned.
+- **UI/UX**:
+  - **Repair Feedback**: Added a "No building selected" message when attempting to repair an empty cell.
+  - **Game Over**: Fixed an issue where the "Wave Complete" popup would appear behind the "Game Over" screen if the last enemy died simultaneously with the base destruction.
+  - **Retry Wave**: Added a **"Retry Wave" (T)** option to the Game Over screen, allowing players to restart the current wave from the last build phase instead of resetting the entire game.
+  - **Spawn Variance**: Enemies can now spawn slightly outside the unlocked grid area (+/- 2 columns), increasing the threat to edge buildings.
+  - **Ammo Range**: Implemented projectile lifetime/range physics. Basic Turrets have an effective ammo range of **600**.
 - **HUD Improvements**:
   - **Detailed Stats**: The HUD now displays **Turret Damage**, **Turret Range**, and **Barracks Capacity** when a building is selected.
   - **Shield Regen**: Added Shield Regeneration Rate (per second) to the Economy stats panel.
   - **Range Indicators**: Selecting a Turret in Build Mode now draws a red circle indicating its attack range.
+  - **Custom Cursor**: Added a custom crosshair cursor for better visibility.
 - **Combat Logic**:
   - **Barracks Capacity**: Implemented a global capacity check for Defenders. Barracks will stop spawning units if the total number of active Defenders exceeds the total capacity of all Barracks.
 
 ### Changed
+- **Balance**:
+  - **Turret Stats**: Basic Turret range set to **300** (Targeting) and **450** (Ammo). Ammo range now scales at 1.5x the targeting range.
+  - **Turret Nerf**: Reduced basic Turret damage to **10** (was 25).
+  - **Upgrade Costs**: Building upgrade costs now scale with level, making high-tier buildings significantly more expensive.
+- **Building Logic**:
+  - **Power Plants**: Can now only be placed on Ground or other Power Plants (fixed bug allowing placement on Turrets).
+  - **Move Validation**: Fixed a bug where picking up a building that supports others would trap the player in the moving state. Added checks to prevent moving supporting structures and allowed placing back in the same spot as a cancel action.
 - **UI/UX**:
+  - **Range Indicators**: Selecting a Turret now displays two range circles: **Blue** for Targeting Range and **Red** for Effective Ammo Range.
+  - **HUD**: Added "Ammo Rng" to the Turret stats panel.
   - **Cursor Visibility**: The grid selection cursor is now hidden during the Combat Phase to reduce visual clutter.
 
 ## [0.2.8] - 2025-11-24

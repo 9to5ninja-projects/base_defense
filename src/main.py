@@ -2,20 +2,16 @@ import pygame
 import sys
 import random
 import math
-from src.core_data import GameState, BuildingType, get_building_template, Enemy, Projectile, GRID_START_X, GRID_SLOT_WIDTH, GRID_CELL_HEIGHT, GROUND_Y, SHIELD_Y, SCREEN_WIDTH, SCREEN_HEIGHT
+import copy
+from src.core_data import GameState, BuildingType, get_building_template, Enemy, Projectile, GRID_START_X, GRID_SLOT_WIDTH, GRID_CELL_HEIGHT, GROUND_Y, SHIELD_Y, SCREEN_WIDTH, SCREEN_HEIGHT, UI_WIDTH, MAX_COLS
 
 # Constants
 FPS = 60
 
 # Layout Constants
-# We use constants from core_data, but we need to recalculate derived values
-# GRID_SLOT_WIDTH is imported from core_data (40)
-MAX_COLS = 32
+# We use constants from core_data
 GRID_WIDTH = GRID_SLOT_WIDTH * MAX_COLS
-UI_WIDTH = 300
 PLAYABLE_WIDTH = SCREEN_WIDTH - UI_WIDTH
-# Recalculate GRID_START_X to center it in the playable area
-GRID_START_X = (PLAYABLE_WIDTH - GRID_WIDTH) // 2
 UI_START_X = PLAYABLE_WIDTH
 
 # Colors
@@ -55,6 +51,7 @@ class Game:
         self.confirm_build_type = None # Type of building waiting for build confirmation
         self.confirm_wave_start = False # Waiting for wave start confirmation
         self.game_over = False
+        self.saved_state = copy.deepcopy(self.state) # Save initial state for retry
         
         self.font = pygame.font.Font(None, 24)
         self.font_large = pygame.font.Font(None, 36)
@@ -82,6 +79,8 @@ class Game:
                 if self.game_over:
                     if event.key == pygame.K_r:
                         self.restart_game()
+                    elif event.key == pygame.K_t and self.saved_state:
+                        self.retry_wave()
                     return
 
                 # Check for reward popup first
@@ -137,6 +136,8 @@ class Game:
                 self.show_menu = False
         elif key == pygame.K_u: # Upgrade
             self.try_upgrade()
+        elif key == pygame.K_r: # Repair
+            self.try_repair()
         elif key == pygame.K_DELETE or key == pygame.K_BACKSPACE: # Destroy
             self.try_destroy()
         elif key == pygame.K_w:  # Start wave
@@ -170,6 +171,10 @@ class Game:
     def start_move(self):
         building = self.state.grid.get_building_at(self.state.selected_column, self.state.selected_row)
         if building:
+            if self.state.grid.is_supporting_others(building):
+                self.add_message("Cannot move: Supporting other buildings", RED)
+                return
+                
             self.moving_building_id = building.id
             self.add_message("Moving Building... Select new position and press Space", YELLOW)
 
@@ -257,9 +262,12 @@ class Game:
         # Reset confirmation if we proceed or if it wasn't needed
         self.confirm_upgrade_id = None
             
+        # Store cost before upgrading (because upgrade changes the template)
+        cost = building.template.upgrade_cost
+        
         success, reason = self.state.grid.upgrade_building(building.id)
         if success:
-            self.state.credits -= building.template.upgrade_cost
+            self.state.credits -= cost
             self.state.update_economy()
             self.add_message(f"{reason} to Level {building.template.level}", GREEN)
             print(f"Upgraded to Level {building.template.level}")
@@ -277,6 +285,36 @@ class Game:
             self.state.grid.destroy_building(building.id)
             self.state.update_economy()
             self.add_message(f"Destroyed {building.template.type.value}. Refund: ${refund}", YELLOW)
+
+    def try_repair(self):
+        """Repair selected building"""
+        building = self.state.grid.get_building_at(self.state.selected_column, self.state.selected_row)
+        if not building:
+            self.add_message("No building selected", RED)
+            return
+        
+        if building.current_hp >= building.template.max_hp:
+            self.add_message("Building HP full", GREEN)
+            return
+            
+        damage = building.template.max_hp - building.current_hp
+        cost = damage * 1 # 1 credit per HP
+        
+        if self.state.credits < cost:
+            # Partial repair if they have at least 1 credit
+            if self.state.credits > 0:
+                repair_amount = self.state.credits
+                building.current_hp += repair_amount
+                self.state.credits = 0
+                self.add_message(f"Partial Repair: +{repair_amount} HP", YELLOW)
+                self.state.update_economy()
+            else:
+                self.add_message(f"Need ${cost} to repair", RED)
+        else:
+            self.state.credits -= cost
+            building.current_hp = building.template.max_hp
+            self.add_message(f"Repaired for ${cost}", GREEN)
+            self.state.update_economy()
     
     def start_wave(self):
         if self.state.energy_surplus < 0:
@@ -307,6 +345,8 @@ class Game:
         # Detect phase change to build
         if prev_phase == "combat" and self.state.phase == "build":
             self.add_message("Wave Complete!", GREEN)
+            # Save state at the start of the build phase (for retry)
+            self.saved_state = copy.deepcopy(self.state)
             
         # Energy Deficit Penalty (Credit Drain)
         if self.state.energy_surplus < 0:
@@ -348,8 +388,9 @@ class Game:
         
         # Check loss condition
         if not self.state.grid.buildings and self.state.wave > 0 and self.state.phase == "combat":  # No buildings left
-             self.game_over = True
-             self.add_message("CRITICAL FAILURE: BASE DESTROYED", RED)
+             if not self.game_over:
+                 self.game_over = True
+                 self.add_message("CRITICAL FAILURE: BASE DESTROYED", RED)
 
     def restart_game(self):
         """Reset game state to initial values"""
@@ -359,7 +400,16 @@ class Game:
         self.state.grid = CityGrid()
         self.game_over = False
         self.messages = []
+        self.saved_state = copy.deepcopy(self.state) # Save initial state for retry
         self.add_message("System Rebooted. Ready for defense.", GREEN)
+
+    def retry_wave(self):
+        """Restore state to beginning of last wave"""
+        if self.saved_state:
+            self.state = copy.deepcopy(self.saved_state)
+            self.game_over = False
+            self.messages = []
+            self.add_message("Time Rewound. Ready to try again.", GREEN)
 
     def draw(self):
         self.screen.fill(BLACK)
@@ -380,7 +430,7 @@ class Game:
         if self.show_menu and self.state.phase == "build":
             self.draw_build_menu()
         
-        if self.state.last_wave_rewards:
+        if self.state.last_wave_rewards and not self.game_over:
             self.draw_wave_complete_popup()
             
         if self.game_over:
@@ -411,16 +461,23 @@ class Game:
                 continue
                 
             # Main body
-            pygame.draw.circle(self.screen, RED, (int(enemy.x), int(enemy.y)), enemy.radius)
+            color = RED
+            if enemy.is_boss:
+                color = (148, 0, 211) # Dark Violet for Boss
+                
+            pygame.draw.circle(self.screen, color, (int(enemy.x), int(enemy.y)), enemy.radius)
             
             # HP bar
             hp_ratio = enemy.current_hp / enemy.max_hp
             bar_width = enemy.radius * 2
             bar_height = 4
+            if enemy.is_boss:
+                bar_height = 8 # Thicker bar for boss
+                
             pygame.draw.rect(self.screen, (50, 50, 50),
-                           (enemy.x - enemy.radius, enemy.y - enemy.radius - 8, bar_width, bar_height))
+                           (enemy.x - enemy.radius, enemy.y - enemy.radius - (bar_height + 4), bar_width, bar_height))
             pygame.draw.rect(self.screen, GREEN,
-                           (enemy.x - enemy.radius, enemy.y - enemy.radius - 8, bar_width * hp_ratio, bar_height))
+                           (enemy.x - enemy.radius, enemy.y - enemy.radius - (bar_height + 4), bar_width * hp_ratio, bar_height))
     
     def draw_projectiles(self):
         """Draw all active projectiles"""
@@ -527,9 +584,9 @@ class Game:
             y += 20
             self.screen.blit(self.font.render("1-6: Place Building", True, WHITE), (x, y))
             y += 20
-            self.screen.blit(self.font.render("U: Upgrade | Del: Destroy", True, WHITE), (x, y))
+            self.screen.blit(self.font.render("U: Upgrade | R: Repair", True, WHITE), (x, y))
             y += 20
-            self.screen.blit(self.font.render("W: Start Wave", True, WHITE), (x, y))
+            self.screen.blit(self.font.render("Del: Destroy | W: Wave", True, WHITE), (x, y))
             y += 40
             
             # Show selected cell info
@@ -564,6 +621,8 @@ class Game:
                 if building.template.type == BuildingType.TURRET:
                     self.screen.blit(self.font.render(f"Dmg: {building.template.damage} | Rng: {building.template.range}", True, RED), (x, y))
                     y += 20
+                    self.screen.blit(self.font.render(f"Ammo Rng: {building.template.ammo_range}", True, RED), (x, y))
+                    y += 20
                 elif building.template.type == BuildingType.BARRACKS:
                     self.screen.blit(self.font.render(f"Cap: {building.template.capacity} Defenders", True, BLUE), (x, y))
                     y += 20
@@ -579,6 +638,12 @@ class Game:
                         preview_text.append(f"Eng: +{next_template.energy_production - building.template.energy_production}")
                     if next_template.shield_hp_bonus > building.template.shield_hp_bonus:
                         preview_text.append(f"Shld: +{next_template.shield_hp_bonus - building.template.shield_hp_bonus}")
+                    if next_template.damage > building.template.damage:
+                        preview_text.append(f"Dmg: +{next_template.damage - building.template.damage}")
+                    if next_template.range > building.template.range:
+                        preview_text.append(f"Rng: +{next_template.range - building.template.range}")
+                    if next_template.capacity > building.template.capacity:
+                        preview_text.append(f"Cap: +{next_template.capacity - building.template.capacity}")
                     if next_template.footprint != building.template.footprint:
                         preview_text.append(f"Size: {next_template.footprint[0]}x{next_template.footprint[1]}")
                         
@@ -587,6 +652,13 @@ class Game:
                         y += 20
                 else:
                     self.screen.blit(self.font.render("Max Level", True, GRAY), (x, y))
+                
+                # Show repair cost if damaged
+                if building.current_hp < building.template.max_hp:
+                    repair_cost = building.template.max_hp - building.current_hp
+                    color = GREEN if self.state.credits >= repair_cost else RED
+                    self.screen.blit(self.font.render(f"Repair: ${repair_cost}", True, color), (x, y))
+                    y += 20
                 
                 self.screen.blit(self.font.render("Space: Move", True, WHITE), (x, y + 20))
             else:
@@ -716,8 +788,10 @@ class Game:
                 turret_x = GRID_START_X + building.column * GRID_SLOT_WIDTH + (width * GRID_SLOT_WIDTH) / 2
                 turret_y = GROUND_Y - building.row * GRID_CELL_HEIGHT - (height * GRID_CELL_HEIGHT) / 2
                 
-                # Draw circle
-                pygame.draw.circle(self.screen, (255, 0, 0), (int(turret_x), int(turret_y)), building.template.range, 1)
+                # Draw targeting range (Blue)
+                pygame.draw.circle(self.screen, BLUE, (int(turret_x), int(turret_y)), building.template.range, 1)
+                # Draw ammo range (Red)
+                pygame.draw.circle(self.screen, RED, (int(turret_x), int(turret_y)), building.template.ammo_range, 1)
     
     def draw_buildings(self):
         """Draw all buildings in the grid"""
@@ -953,6 +1027,12 @@ class Game:
         restart = self.font.render("Press R to Restart", True, YELLOW)
         restart_rect = restart.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 50))
         self.screen.blit(restart, restart_rect)
+        
+        # Retry Prompt
+        if self.saved_state:
+            retry = self.font.render("Press T to Retry Wave", True, GREEN)
+            retry_rect = retry.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 80))
+            self.screen.blit(retry, retry_rect)
     
     def run(self):
         while self.running:
