@@ -850,11 +850,12 @@ class Game:
             
             # Stats string
             stats = []
+            stats.append(f"HP: {template.max_hp}")
             if template.energy_production > 0: stats.append(f"Energy: +{template.energy_production}")
             if template.energy_consumption > 0: stats.append(f"Energy: -{template.energy_consumption}")
             if template.shield_hp_bonus > 0: stats.append(f"Shield: +{template.shield_hp_bonus}")
             if template.shield_recharge_bonus > 0: stats.append(f"Rchrg: +{template.shield_recharge_bonus:.1f}")
-            if building_type == BuildingType.TURRET: stats.append("Dmg: 25")
+            if building_type == BuildingType.TURRET: stats.append(f"Dmg: {template.damage}")
             if building_type == BuildingType.BARRACKS: stats.append("Spawns Defenders")
             
             stats_text = " | ".join(stats)

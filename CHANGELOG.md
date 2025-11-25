@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.18] - 2025-11-25
+
+### Added
+- **Turret Ballistics**:
+  - **Projectile Speed**: Implemented linear speed scaling for Basic Turrets. Speed now starts at 300 px/s and increases by 20 px/s per level (up to 460 px/s at Level 9).
+  - **Cooldown**: Added a `cooldown` stat to `BuildingTemplate`. Basic Turrets are currently set to 1.0s.
+- **UI/UX**:
+  - **Build Menu**: Added HP display to the building stats panel.
+
+### Fixed
+- **Game Logic**:
+  - **Perfect Defense**: Refined the "Perfect Defense" bonus logic. It now tracks if *any* damage was taken during the wave, rather than checking if all buildings are at 100% HP at the end. This allows players to receive the bonus even if they start the wave with damaged buildings, provided they defend successfully.
+- **UI/UX**:
+  - **Stat Display**: Fixed the Turret Damage display in the Build Menu to show the correct base value (10) instead of a hardcoded placeholder.
+
 ## [0.2.17] - 2025-11-25
 
 ### Added

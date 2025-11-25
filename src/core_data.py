@@ -26,6 +26,8 @@ class BuildingTemplate:
     range: int = 0
     ammo_range: int = 0
     capacity: int = 0
+    projectile_speed: int = 0
+    cooldown: float = 1.0
     
     @property
     def tier(self) -> int:
@@ -115,6 +117,7 @@ def get_building_template(building_type: BuildingType, level: int) -> BuildingTe
             'range': 300,
             'ammo_range': 450,
             'capacity': 0,
+            'cooldown': 1.0,
         },
         BuildingType.DRONE_FACTORY: {
             'max_hp': 130,
@@ -153,12 +156,16 @@ def get_building_template(building_type: BuildingType, level: int) -> BuildingTe
     # Calculate ammo range scaling
     # Basic Turret: Ammo range is 1.5x targeting range (starts at 300/450)
     calc_ammo_range = base.get('ammo_range', 0)
+    calc_speed = 0
+
     if building_type == BuildingType.TURRET:
         # Define explicit stats for Basic Turret Tiers
         # Tier 1 (Levels 1-3): Standard
         # Tier 2 (Levels 4-6): High Velocity (Range+)
         # Tier 3 (Levels 7-9): Heavy Caliber (Damage+)
         
+        calc_speed = 300 + (level - 1) * 20
+
         tier = 1
         if level > 6: tier = 3
         elif level > 3: tier = 2
@@ -191,7 +198,9 @@ def get_building_template(building_type: BuildingType, level: int) -> BuildingTe
                 damage=int(base_dmg + (lvl_offset * 5)),
                 range=int(base_rng + (lvl_offset * 30)),
                 ammo_range=int((base_rng + (lvl_offset * 30)) * 1.5),
-                capacity=0
+                capacity=0,
+                projectile_speed=calc_speed,
+                cooldown=1.0
             )
             
         elif tier == 3:
@@ -215,7 +224,9 @@ def get_building_template(building_type: BuildingType, level: int) -> BuildingTe
                 damage=int(base_dmg + (lvl_offset * 10)),
                 range=int(base_rng + (lvl_offset * 20)),
                 ammo_range=int((base_rng + (lvl_offset * 20)) * 1.5),
-                capacity=0
+                capacity=0,
+                projectile_speed=calc_speed,
+                cooldown=1.0
             )
 
         calc_ammo_range = int(calc_range * 1.5)
@@ -234,6 +245,8 @@ def get_building_template(building_type: BuildingType, level: int) -> BuildingTe
         range=calc_range,
         ammo_range=calc_ammo_range,
         capacity=int(base['capacity'] * level), # Capacity scales linearly with level (2, 4, 6...)
+        projectile_speed=calc_speed,
+        cooldown=base.get('cooldown', 1.0)
     )
 
 @dataclass
@@ -614,9 +627,11 @@ class CombatManager:
         self.ground_units: List[GroundUnit] = []
         self.current_wave: Optional[Wave] = None
         self.wave_complete_timer: float = 0
+        self.damage_taken_this_wave: bool = False
         
     def start_wave(self):
         """Initialize new wave"""
+        self.damage_taken_this_wave = False
         self.current_wave = Wave(
             wave_number=self.state.wave,
             enemies_remaining=0
@@ -755,6 +770,7 @@ class CombatManager:
                 hit_buildings.append(building)
         
         if hit_buildings:
+            self.damage_taken_this_wave = True
             self.state.add_log(f"Enemy exploded! Hit {len(hit_buildings)} buildings.")
             for building in hit_buildings:
                 building.current_hp -= damage
@@ -945,6 +961,7 @@ class CombatManager:
                     # Explode on contact
                     damage = unit.hp
                     hit_building.current_hp -= damage
+                    self.damage_taken_this_wave = True
                     self.state.add_log(f"Invader crashed into building! -{damage} HP")
                     if hit_building.current_hp <= 0:
                         self.state.grid.destroy_building(hit_building.id)
@@ -1002,6 +1019,7 @@ class CombatManager:
                          # Explode on contact (Predictive)
                         damage = unit.hp
                         hit_building.current_hp -= damage
+                        self.damage_taken_this_wave = True
                         self.state.add_log(f"Invader crashed into building! -{damage} HP")
                         if hit_building.current_hp <= 0:
                             self.state.grid.destroy_building(hit_building.id)
@@ -1069,8 +1087,11 @@ class CombatManager:
                     # Use building range
                     target = self.find_nearest_enemy(turret_x, turret_y, max_range=building.template.range)
                     if target:
-                        self.fire_projectile(turret_x, turret_y, target, damage=building.template.damage, max_range=building.template.ammo_range)
-                        building.cooldown = 1.0
+                        self.fire_projectile(turret_x, turret_y, target, 
+                                             damage=building.template.damage, 
+                                             max_range=building.template.ammo_range,
+                                             speed=building.template.projectile_speed)
+                        building.cooldown = building.template.cooldown
     
     def find_nearest_enemy(self, x, y, max_range=600):
         """Find closest enemy within range"""
@@ -1085,7 +1106,7 @@ class CombatManager:
         
         return nearest
     
-    def fire_projectile(self, from_x, from_y, target, damage=25, max_range=0):
+    def fire_projectile(self, from_x, from_y, target, damage=25, max_range=0, speed=300):
         """Create projectile aimed at target"""
         dx = target.x - from_x
         dy = target.y - from_y
@@ -1094,7 +1115,7 @@ class CombatManager:
         if dist == 0:
             return
         
-        speed = 300
+        if speed <= 0: speed = 300
         vx = (dx / dist) * speed
         vy = (dy / dist) * speed
         
@@ -1193,12 +1214,7 @@ class CombatManager:
         """Transition back to build phase"""
         base_reward = 100 + (self.current_wave.wave_number * 25)
         
-        perfect_wave = True
-        
-        for building in self.state.grid.buildings:
-            if building.current_hp < building.template.max_hp:
-                perfect_wave = False
-                break
+        perfect_wave = not self.damage_taken_this_wave
         
         perfect_bonus = 0
         if perfect_wave:
