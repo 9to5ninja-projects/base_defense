@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.20] - 2025-11-25
+
+### Added
+- **Economy**:
+  - **Sell Function**: Replaced the "Destroy" action with "Sell".
+    - **Refund Logic**: Selling a building now refunds **50% of the Total Investment** (Base Cost + All Upgrade Costs), allowing for better strategic pivoting without total loss.
+- **UI/UX**:
+  - **Sell Preview**: The HUD now displays the exact Sell Value (Refund amount) when a building is selected.
+  - **Controls**: Updated HUD control hints to show "Del: Sell".
+
+### Changed
+- **Building Logic**:
+  - **Investment Tracking**: Buildings now calculate their total value based on their current level and all previous upgrade costs.
+
 ## [0.2.19] - 2025-11-25
 
 ### Added

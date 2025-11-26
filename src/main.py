@@ -226,8 +226,8 @@ class Game:
             self.try_upgrade()
         elif key == pygame.K_r: # Repair
             self.try_repair()
-        elif key == pygame.K_DELETE or key == pygame.K_BACKSPACE: # Destroy
-            self.try_destroy()
+        elif key == pygame.K_DELETE or key == pygame.K_BACKSPACE: # Sell
+            self.try_sell()
         elif key == pygame.K_w:  # Start wave
             self.start_wave()
             
@@ -363,16 +363,17 @@ class Game:
             self.add_message(f"Upgrade failed: {reason}", RED)
             print(f"Upgrade failed: {reason}")
 
-    def try_destroy(self):
-        """Destroy building at selected position"""
+    def try_sell(self):
+        """Sell building at selected position"""
         building = self.state.grid.get_building_at(self.state.selected_column, self.state.selected_row)
         if building:
-            # Refund 50%
-            refund = int(building.template.cost * 0.5)
+            # Refund 50% of total investment
+            total_value = building.get_total_investment()
+            refund = int(total_value * 0.5)
             self.state.credits += refund
             self.state.grid.destroy_building(building.id)
             self.state.update_economy()
-            self.add_message(f"Destroyed {building.template.type.value}. Refund: ${refund}", YELLOW)
+            self.add_message(f"Sold {building.template.type.value}. Refund: ${refund}", YELLOW)
 
     def try_repair(self):
         """Repair selected building"""
@@ -759,7 +760,7 @@ class Game:
             y += 20
             self.screen.blit(self.font.render("U: Upgrade | R: Repair", True, WHITE), (x, y))
             y += 20
-            self.screen.blit(self.font.render("Del: Destroy | W: Wave", True, WHITE), (x, y))
+            self.screen.blit(self.font.render("Del: Sell | W: Wave", True, WHITE), (x, y))
             y += 40
             
             # Show selected cell info
@@ -833,6 +834,11 @@ class Game:
                     self.screen.blit(self.font.render(f"Repair: ${repair_cost}", True, color), (x, y))
                     y += 20
                 
+                # Show Sell Value
+                sell_value = int(building.get_total_investment() * 0.5)
+                self.screen.blit(self.font.render(f"Sell: ${sell_value}", True, YELLOW), (x, y))
+                y += 20
+
                 self.screen.blit(self.font.render("Space: Move", True, WHITE), (x, y + 20))
             else:
                 self.screen.blit(self.font.render("Empty", True, GRAY), (x, y))

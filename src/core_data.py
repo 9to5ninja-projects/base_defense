@@ -270,6 +270,15 @@ class Building:
                 occupied.add((self.column + dx, self.row + dy))
         return occupied
     
+    def get_total_investment(self) -> int:
+        """Calculate total credits invested in this building"""
+        total = self.template.cost
+        # Sum upgrade costs for all levels prior to current
+        for lvl in range(1, self.template.level):
+            tmpl = get_building_template(self.template.type, lvl)
+            total += tmpl.upgrade_cost
+        return total
+
     def can_upgrade(self) -> bool:
         """Check if building can level up"""
         return self.template.upgrade_cost > 0 and self.template.level < 9
