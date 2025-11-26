@@ -478,10 +478,16 @@ class CityGrid:
             # Check ALL cells below the new building
             for dx in range(width):
                 below_building = self.get_building_at(column + dx, row - 1)
-                if below_building and below_building.template.type == BuildingType.BARRACKS:
-                    # Only defensive (Turret) or Barracks allowed
-                    if building_type not in [BuildingType.TURRET, BuildingType.BARRACKS]:
-                        return False, "Only Defensive buildings allowed on Barracks"
+                if below_building:
+                    if below_building.template.type == BuildingType.BARRACKS:
+                        # Only defensive (Turret) or Barracks allowed
+                        if building_type not in [BuildingType.TURRET, BuildingType.BARRACKS]:
+                            return False, "Only Defensive buildings allowed on Barracks"
+                    
+                    elif below_building.template.type == BuildingType.DRONE_FACTORY:
+                        # Only Turrets or Drone Factories allowed on Drone Factories
+                        if building_type not in [BuildingType.TURRET, BuildingType.DRONE_FACTORY]:
+                            return False, "Only Turrets/Drone Factories allowed on Drone Factory"
 
         return True, "OK"
     

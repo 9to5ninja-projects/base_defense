@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] - 2025-11-26
+
+### Added
+- **Core Features**:
+  - **Building Context Menu**: Pressing SPACE on an existing building now opens a context menu with options to **Move**, **Upgrade**, **Repair**, or **Sell**.
+  - **Move Command**: Added 'M' hotkey to quickly move the selected building.
+  - **Main Menu Navigation**: The Main Menu now supports full keyboard navigation using Arrow Keys and Space/Enter.
+- **Rebranding**:
+  - **Title**: Renamed the game to **"Skyguard: Cell Defense"**.
+  - **Visuals**: Updated window caption and Main Menu title.
+
+### Changed
+- **Building Logic**:
+  - **Stacking Rules**: Enforced stricter placement rules for **Drone Factories**. They can now only support **Turrets** or other **Drone Factories**. Utility buildings (Datacenters, Capacitors) can no longer be placed on top of them.
+- **UI/UX**:
+  - **Main Menu**: Added visual brackets to menu options (e.g., `[N]ew Game`) to clearly indicate hotkeys.
+
 ## [0.2.22] - 2025-11-26
 
 ### Added

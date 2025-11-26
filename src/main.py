@@ -34,7 +34,7 @@ class Game:
         # Create the virtual screen surface (fixed resolution)
         self.screen = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
         
-        pygame.display.set_caption("Missile Defense - Cell Grid")
+        pygame.display.set_caption("Skyguard: Cell Defense")
         self.clock = pygame.time.Clock()
         self.running = True
         self.fullscreen = False
@@ -42,8 +42,11 @@ class Game:
         self.menu_state = "MAIN_MENU" # MAIN_MENU, PLAYING, PAUSED
         self.state = None # Initialized on New Game
         
+        self.main_menu_selection = 0 # Index for main menu navigation
         self.show_menu = False
         self.show_help = False
+        self.show_building_menu = False # Context menu for existing buildings
+        self.building_menu_selection = 0
         self.build_menu_selection = 0 # Index of selected building in build menu
         self.messages = [] # List of (text, color, timer)
         self.moving_building_id = None
@@ -141,6 +144,8 @@ class Game:
                             self.add_message("Move Cancelled", YELLOW)
                         elif self.show_menu:
                             self.show_menu = False
+                        elif self.show_building_menu:
+                            self.show_building_menu = False
                         elif self.state.last_wave_rewards:
                             self.state.last_wave_rewards = None
                         else:
@@ -175,6 +180,23 @@ class Game:
                 self.show_help = False
             return
 
+        # Menu Navigation
+        if key == pygame.K_UP:
+            self.main_menu_selection = (self.main_menu_selection - 1) % 4
+        elif key == pygame.K_DOWN:
+            self.main_menu_selection = (self.main_menu_selection + 1) % 4
+        elif key == pygame.K_RETURN or key == pygame.K_SPACE:
+            if self.main_menu_selection == 0: # New Game
+                self.new_game()
+            elif self.main_menu_selection == 1: # Load Game
+                if not self.load_game():
+                    print("No save file found")
+            elif self.main_menu_selection == 2: # Help
+                self.show_help = True
+            elif self.main_menu_selection == 3: # Quit
+                self.running = False
+
+        # Hotkeys (keep these for convenience)
         if key == pygame.K_n:
             self.new_game()
         elif key == pygame.K_l:
@@ -245,6 +267,32 @@ class Game:
                 if self.request_build(BuildingType.BARRACKS): self.show_menu = False
             return
 
+        # Handle Building Context Menu
+        if self.show_building_menu:
+            options = self.get_building_menu_options()
+            if not options:
+                self.show_building_menu = False
+                return
+
+            if key == pygame.K_UP:
+                self.building_menu_selection = (self.building_menu_selection - 1) % len(options)
+            elif key == pygame.K_DOWN:
+                self.building_menu_selection = (self.building_menu_selection + 1) % len(options)
+            elif key == pygame.K_RETURN or key == pygame.K_SPACE:
+                action = options[self.building_menu_selection]['action']
+                action()
+                self.show_building_menu = False
+            elif key == pygame.K_ESCAPE:
+                self.show_building_menu = False
+            
+            # Allow hotkeys to work even in menu
+            if key == pygame.K_u: self.try_upgrade(); self.show_building_menu = False
+            elif key == pygame.K_r: self.try_repair(); self.show_building_menu = False
+            elif key == pygame.K_DELETE or key == pygame.K_BACKSPACE: self.try_sell(); self.show_building_menu = False
+            elif key == pygame.K_m: self.start_move(); self.show_building_menu = False
+            
+            return
+
         # Grid Navigation
         if key == pygame.K_LEFT:
             self.state.selected_column = max(0, self.state.selected_column - 1)
@@ -254,13 +302,19 @@ class Game:
             self.state.selected_row = min(self.state.grid.rows - 1, self.state.selected_row + 1)
         elif key == pygame.K_DOWN:
             self.state.selected_row = max(0, self.state.selected_row - 1)
+        elif key == pygame.K_m:
+            # 'M' to move highlighted building
+            if self.state.grid.get_building_at(self.state.selected_column, self.state.selected_row):
+                self.start_move()
         elif key == pygame.K_RETURN or key == pygame.K_SPACE:
             if self.moving_building_id is not None:
                 self.finish_move()
             elif self.can_unlock_current_column():
                 self.unlock_current_column()
             elif self.state.grid.get_building_at(self.state.selected_column, self.state.selected_row):
-                self.start_move()
+                # Open Context Menu
+                self.show_building_menu = True
+                self.building_menu_selection = 0
             else:
                 self.show_menu = True
                 self.build_menu_selection = 0 # Reset selection
@@ -582,6 +636,102 @@ class Game:
             self.messages = []
             self.add_message("Time Rewound. Ready to try again.", GREEN)
 
+    def get_building_menu_options(self):
+        """Get available actions for the currently selected building"""
+        building = self.state.grid.get_building_at(self.state.selected_column, self.state.selected_row)
+        if not building:
+            return []
+            
+        options = []
+        
+        # Move
+        options.append({
+            'label': "Move",
+            'action': self.start_move
+        })
+        
+        # Upgrade
+        if building.can_upgrade():
+            cost = building.template.upgrade_cost
+            color = WHITE if self.state.credits >= cost else RED
+            options.append({
+                'label': f"Upgrade (${cost})",
+                'action': self.try_upgrade,
+                'color': color
+            })
+        
+        # Repair (only if damaged)
+        if building.current_hp < building.template.max_hp:
+            cost = building.template.max_hp - building.current_hp
+            color = WHITE if self.state.credits >= cost else RED
+            options.append({
+                'label': f"Repair (${cost})",
+                'action': self.try_repair,
+                'color': color
+            })
+            
+        # Sell
+        refund = int(building.get_total_investment() * 0.5)
+        options.append({
+            'label': f"Sell (+${refund})",
+            'action': self.try_sell,
+            'color': YELLOW
+        })
+        
+        # Cancel
+        options.append({
+            'label': "Cancel (ESC)",
+            'action': lambda: None,
+            'color': GRAY
+        })
+        
+        return options
+
+    def draw_building_menu(self):
+        """Draw context menu for selected building"""
+        options = self.get_building_menu_options()
+        if not options:
+            self.show_building_menu = False
+            return
+
+        # Position menu near the building
+        col = self.state.selected_column
+        row = self.state.selected_row
+        
+        # Calculate screen position
+        # Center horizontally on the cell
+        menu_x = GRID_START_X + (col * GRID_SLOT_WIDTH) + (GRID_SLOT_WIDTH // 2)
+        # Position above the building
+        building = self.state.grid.get_building_at(col, row)
+        height_cells = building.template.footprint[1] if building else 1
+        menu_y = GROUND_Y - (row * GRID_CELL_HEIGHT) - (height_cells * GRID_CELL_HEIGHT) - 10
+        
+        # Dimensions
+        menu_width = 200
+        item_height = 30
+        menu_height = len(options) * item_height + 10
+        
+        # Adjust if off screen
+        if menu_x + menu_width > SCREEN_WIDTH:
+            menu_x = SCREEN_WIDTH - menu_width - 10
+        if menu_y - menu_height < 0:
+            menu_y = GROUND_Y - (row * GRID_CELL_HEIGHT) + 10 # Draw below if no space above
+            
+        # Draw Background
+        pygame.draw.rect(self.screen, (30, 30, 40), (menu_x, menu_y, menu_width, menu_height))
+        pygame.draw.rect(self.screen, WHITE, (menu_x, menu_y, menu_width, menu_height), 1)
+        
+        # Draw Options
+        for i, opt in enumerate(options):
+            color = opt.get('color', WHITE)
+            if i == self.building_menu_selection:
+                # Highlight
+                pygame.draw.rect(self.screen, (60, 60, 80), (menu_x + 2, menu_y + 5 + i*item_height, menu_width - 4, item_height))
+                if color == WHITE: color = YELLOW
+            
+            text = self.font.render(opt['label'], True, color)
+            self.screen.blit(text, (menu_x + 10, menu_y + 10 + i*item_height))
+
     def draw(self):
         self.screen.fill(BLACK)
         
@@ -607,6 +757,9 @@ class Game:
             
             if self.show_menu and self.state.phase == "build":
                 self.draw_build_menu()
+            
+            if self.show_building_menu and self.state.phase == "build":
+                self.draw_building_menu()
             
             if self.show_help:
                 self.draw_help_menu()
@@ -644,8 +797,8 @@ class Game:
         self.screen.fill((20, 20, 30))
         
         # Title
-        title = self.font_title.render("MISSILE DEFENSE", True, GREEN)
-        subtitle = self.font_large.render("CELL GRID COMMAND", True, WHITE)
+        title = self.font_title.render("SKYGUARD", True, GREEN)
+        subtitle = self.font_large.render("CELL DEFENSE", True, WHITE)
         
         title_rect = title.get_rect(center=(SCREEN_WIDTH // 2, 200))
         subtitle_rect = subtitle.get_rect(center=(SCREEN_WIDTH // 2, 260))
@@ -655,21 +808,27 @@ class Game:
         
         # Options
         options = [
-            "[N] New Game",
-            "[L] Load Game",
-            "[H] Field Manual",
-            "[Q] Quit"
+            "[N]ew Game",
+            "[L]oad Game",
+            "[H]elp / Manual",
+            "[Q]uit"
         ]
         
         y = 400
-        for opt in options:
-            text = self.font_large.render(opt, True, WHITE)
+        for i, opt in enumerate(options):
+            color = WHITE
+            prefix = ""
+            if i == self.main_menu_selection:
+                color = YELLOW
+                prefix = "> "
+                
+            text = self.font_large.render(f"{prefix}{opt}", True, color)
             rect = text.get_rect(center=(SCREEN_WIDTH // 2, y))
             self.screen.blit(text, rect)
             y += 50
             
         # Footer
-        footer = self.font.render("v0.2.16 - 2025", True, GRAY)
+        footer = self.font.render("v0.3.0 - 2025", True, GRAY)
         self.screen.blit(footer, (10, SCREEN_HEIGHT - 30))
 
     def draw_pause_menu(self):
@@ -856,7 +1015,7 @@ class Game:
             y += 20
             self.screen.blit(self.font.render("U: Upgrade | R: Repair", True, WHITE), (x, y))
             y += 20
-            self.screen.blit(self.font.render("Del: Sell | W: Wave", True, WHITE), (x, y))
+            self.screen.blit(self.font.render("Del: Sell | W: Start Wave", True, WHITE), (x, y))
             y += 20
             self.screen.blit(self.font.render("H: Field Manual", True, WHITE), (x, y))
             y += 40
