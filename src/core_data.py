@@ -51,6 +51,14 @@ class BuildingTemplate:
             else:  # tier 3
                 return (3, 3)
         
+        elif self.type == BuildingType.DRONE_FACTORY:
+            if self.tier == 1:
+                return (2, 1)
+            elif self.tier == 2:
+                return (2, 2)
+            else:  # tier 3
+                return (2, 3)
+        
         elif self.type in [BuildingType.DATACENTER, BuildingType.CAPACITOR, BuildingType.BARRACKS]:
             # Datacenters grow horizontally now (Tier x 1)
             if self.type == BuildingType.DATACENTER:

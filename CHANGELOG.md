@@ -20,6 +20,11 @@ All notable changes to this project will be documented in this file.
   - **Shield Refill**: Shields now automatically refill to 100% and reactivate at the start of every wave.
 - **Physics**:
   - **Shield Collision**: Improved shield collision detection to account for the shield's variable thickness. Enemies now impact the "top" edge of the shield (which rises as Shield HP increases) rather than a fixed line, making high-HP shields feel more robust and responsive.
+- **Buildings**:
+  - **Drone Factory**: Updated dimensions to be larger and grow vertically.
+    - **Tier 1**: 2x1 (Width x Height).
+    - **Tier 2**: 2x2.
+    - **Tier 3**: 2x3.
 
 ## [0.2.20] - 2025-11-25
 
