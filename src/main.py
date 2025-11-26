@@ -5,7 +5,7 @@ import math
 import copy
 import pickle
 import os
-from src.core_data import GameState, BuildingType, get_building_template, Enemy, Projectile, GRID_START_X, GRID_SLOT_WIDTH, GRID_CELL_HEIGHT, GROUND_Y, SHIELD_Y, SCREEN_WIDTH, SCREEN_HEIGHT, UI_WIDTH, MAX_COLS
+from src.core_data import GameState, BuildingType, BuildingCategory, get_building_template, Building, Enemy, Projectile, GRID_START_X, GRID_SLOT_WIDTH, GRID_CELL_HEIGHT, GROUND_Y, SHIELD_Y, SCREEN_WIDTH, SCREEN_HEIGHT, UI_WIDTH, MAX_COLS
 
 # Constants
 FPS = 60
@@ -43,6 +43,8 @@ class Game:
         self.state = None # Initialized on New Game
         
         self.show_menu = False
+        self.show_help = False
+        self.build_menu_selection = 0 # Index of selected building in build menu
         self.messages = [] # List of (text, color, timer)
         self.moving_building_id = None
         self.unlock_cost = 1000
@@ -128,6 +130,11 @@ class Game:
                 elif self.menu_state == "PAUSED":
                     self.handle_pause_menu_input(event.key)
                 elif self.menu_state == "PLAYING":
+                    if self.show_help:
+                        if event.key == pygame.K_ESCAPE or event.key == pygame.K_h:
+                            self.show_help = False
+                        return
+
                     if event.key == pygame.K_ESCAPE:
                         if self.moving_building_id is not None:
                             self.moving_building_id = None
@@ -155,16 +162,27 @@ class Game:
                             self.state.last_wave_rewards = None # Dismiss
                         return # Block other input while popup is up
 
+                    if event.key == pygame.K_h:
+                        self.show_help = not self.show_help
+                        return
+
                     if self.state.phase == "build":
                         self.handle_build_input(event.key)
 
     def handle_main_menu_input(self, key):
+        if self.show_help:
+            if key in (pygame.K_ESCAPE, pygame.K_h, pygame.K_SPACE, pygame.K_RETURN):
+                self.show_help = False
+            return
+
         if key == pygame.K_n:
             self.new_game()
         elif key == pygame.K_l:
             if not self.load_game():
                 # Show error somehow? For now just print
                 print("No save file found")
+        elif key == pygame.K_h:
+            self.show_help = True
         elif key == pygame.K_q or key == pygame.K_ESCAPE:
             self.running = False
 
@@ -181,6 +199,53 @@ class Game:
             self.running = False
     
     def handle_build_input(self, key):
+        # 1. Handle Confirmation State
+        if self.confirm_build_type:
+            if key == pygame.K_RETURN or key == pygame.K_SPACE:
+                self.execute_build()
+            elif key == pygame.K_ESCAPE:
+                self.confirm_build_type = None
+                self.add_message("Build Cancelled", YELLOW)
+            return # Block other input
+
+        # Handle Menu Navigation
+        if self.show_menu:
+            building_types = [
+                BuildingType.POWER_PLANT,
+                BuildingType.DATACENTER,
+                BuildingType.CAPACITOR,
+                BuildingType.TURRET,
+                BuildingType.DRONE_FACTORY,
+                BuildingType.BARRACKS
+            ]
+            
+            if key == pygame.K_UP:
+                self.build_menu_selection = (self.build_menu_selection - 1) % len(building_types)
+            elif key == pygame.K_DOWN:
+                self.build_menu_selection = (self.build_menu_selection + 1) % len(building_types)
+            elif key == pygame.K_RETURN or key == pygame.K_SPACE:
+                selected_type = building_types[self.build_menu_selection]
+                if self.request_build(selected_type):
+                    self.show_menu = False
+            elif key == pygame.K_ESCAPE:
+                self.show_menu = False
+            
+            # Allow hotkeys to override menu selection
+            elif key == pygame.K_1:
+                if self.request_build(BuildingType.POWER_PLANT): self.show_menu = False
+            elif key == pygame.K_2:
+                if self.request_build(BuildingType.DATACENTER): self.show_menu = False
+            elif key == pygame.K_3:
+                if self.request_build(BuildingType.CAPACITOR): self.show_menu = False
+            elif key == pygame.K_4:
+                if self.request_build(BuildingType.TURRET): self.show_menu = False
+            elif key == pygame.K_5:
+                if self.request_build(BuildingType.DRONE_FACTORY): self.show_menu = False
+            elif key == pygame.K_6:
+                if self.request_build(BuildingType.BARRACKS): self.show_menu = False
+            return
+
+        # Grid Navigation
         if key == pygame.K_LEFT:
             self.state.selected_column = max(0, self.state.selected_column - 1)
         elif key == pygame.K_RIGHT:
@@ -197,7 +262,8 @@ class Game:
             elif self.state.grid.get_building_at(self.state.selected_column, self.state.selected_row):
                 self.start_move()
             else:
-                self.show_menu = not self.show_menu
+                self.show_menu = True
+                self.build_menu_selection = 0 # Reset selection
         elif key == pygame.K_ESCAPE:
             if self.moving_building_id is not None:
                 self.moving_building_id = None # Cancel move
@@ -205,22 +271,22 @@ class Game:
             else:
                 self.show_menu = False
         elif key == pygame.K_1:  # Quick build power plant
-            if self.try_build(BuildingType.POWER_PLANT):
+            if self.request_build(BuildingType.POWER_PLANT):
                 self.show_menu = False
         elif key == pygame.K_2:  # Quick build datacenter
-            if self.try_build(BuildingType.DATACENTER):
+            if self.request_build(BuildingType.DATACENTER):
                 self.show_menu = False
         elif key == pygame.K_3:  # Quick build capacitor
-            if self.try_build(BuildingType.CAPACITOR):
+            if self.request_build(BuildingType.CAPACITOR):
                 self.show_menu = False
         elif key == pygame.K_4:  # Quick build turret
-            if self.try_build(BuildingType.TURRET):
+            if self.request_build(BuildingType.TURRET):
                 self.show_menu = False
         elif key == pygame.K_5:  # Quick build drone factory
-            if self.try_build(BuildingType.DRONE_FACTORY):
+            if self.request_build(BuildingType.DRONE_FACTORY):
                 self.show_menu = False
         elif key == pygame.K_6:  # Quick build barracks
-            if self.try_build(BuildingType.BARRACKS):
+            if self.request_build(BuildingType.BARRACKS):
                 self.show_menu = False
         elif key == pygame.K_u: # Upgrade
             self.try_upgrade()
@@ -283,8 +349,8 @@ class Game:
         else:
             self.add_message(f"Cannot move here: {reason}", RED)
     
-    def try_build(self, building_type: BuildingType) -> bool:
-        """Attempt to build at selected position"""
+    def request_build(self, building_type: BuildingType) -> bool:
+        """Request to build at selected position (Confirmation Step)"""
         col = self.state.selected_column
         row = self.state.selected_row
         
@@ -301,22 +367,42 @@ class Game:
             print("Not enough credits")
             return False
             
+        self.confirm_build_type = building_type
+        
         # Check for negative energy warning
         net_energy = template.energy_production - template.energy_consumption
         if self.state.energy_surplus + net_energy < 0:
-            if self.confirm_build_type != building_type:
-                self.confirm_build_type = building_type
-                self.add_message("WARNING: Building causes NEGATIVE ENERGY!", RED)
-                self.add_message("Press again to confirm.", YELLOW)
-                return False
+            self.add_message("WARNING: Negative Energy! SPACE to Confirm.", RED)
+        else:
+            self.add_message(f"Build {building_type.value}? SPACE to Confirm.", YELLOW)
+            
+        return True
+
+    def execute_build(self):
+        """Execute the confirmed build"""
+        if not self.confirm_build_type:
+            return
+
+        building_type = self.confirm_build_type
+        col = self.state.selected_column
+        row = self.state.selected_row
+        template = get_building_template(building_type, 1)
         
-        self.confirm_build_type = None # Reset confirmation
-        
+        # Re-check cost just in case
+        if self.state.credits < template.cost:
+            self.add_message("Not enough credits", RED)
+            self.confirm_build_type = None
+            return
+
         self.state.credits -= template.cost
         self.state.grid.place_building(building_type, col, row)
         self.state.update_economy()
         self.add_message(f"Built {building_type.value}", GREEN)
-        return True
+        self.confirm_build_type = None
+
+    def try_build(self, building_type: BuildingType) -> bool:
+        # Deprecated wrapper for compatibility if needed, but we replaced calls
+        return self.request_build(building_type)
 
     def try_upgrade(self):
         """Try to upgrade building at selected position"""
@@ -501,6 +587,8 @@ class Game:
         
         if self.menu_state == "MAIN_MENU":
             self.draw_main_menu()
+            if self.show_help:
+                self.draw_help_menu()
         else:
             # Draw Game
             self.draw_grid()
@@ -519,6 +607,9 @@ class Game:
             
             if self.show_menu and self.state.phase == "build":
                 self.draw_build_menu()
+            
+            if self.show_help:
+                self.draw_help_menu()
             
             if self.state.last_wave_rewards and not self.game_over:
                 self.draw_wave_complete_popup()
@@ -566,6 +657,7 @@ class Game:
         options = [
             "[N] New Game",
             "[L] Load Game",
+            "[H] Field Manual",
             "[Q] Quit"
         ]
         
@@ -765,6 +857,8 @@ class Game:
             self.screen.blit(self.font.render("U: Upgrade | R: Repair", True, WHITE), (x, y))
             y += 20
             self.screen.blit(self.font.render("Del: Sell | W: Wave", True, WHITE), (x, y))
+            y += 20
+            self.screen.blit(self.font.render("H: Field Manual", True, WHITE), (x, y))
             y += 40
             
             # Show selected cell info
@@ -790,6 +884,12 @@ class Game:
             elif building:
                 self.screen.blit(self.font.render(f"{building.template.type.value.title()}", True, GREEN), (x, y))
                 y += 20
+                
+                # Category
+                cat_name = building.template.category.value
+                self.screen.blit(pygame.font.Font(None, 20).render(f"Type: {cat_name}", True, GRAY), (x, y))
+                y += 20
+                
                 self.screen.blit(self.font.render(f"Level: {building.template.level}", True, WHITE), (x, y))
                 y += 20
                 self.screen.blit(self.font.render(f"HP: {building.current_hp}/{building.template.max_hp}", True, WHITE), (x, y))
@@ -804,7 +904,8 @@ class Game:
                 elif building.template.type == BuildingType.BARRACKS:
                     self.screen.blit(self.font.render(f"Cap: {building.template.capacity} Defenders", True, BLUE), (x, y))
                     y += 20
-                    self.screen.blit(self.font.render(f"Gen Cost: 1cr", True, YELLOW), (x, y))
+                    rate = building.template.level / 10.0
+                    self.screen.blit(self.font.render(f"Spawn: {rate:.1f}/s (1cr)", True, YELLOW), (x, y))
                     y += 20
                 elif building.template.type == BuildingType.DRONE_FACTORY:
                     # Calculate global capacity for context
@@ -812,7 +913,7 @@ class Game:
                     current_drones = len(self.state.combat.drones) if self.state.combat else 0
                     self.screen.blit(self.font.render(f"Global Cap: {current_drones}/{drone_cap}", True, (0, 255, 255)), (x, y))
                     y += 20
-                    self.screen.blit(self.font.render(f"Gen Cost: 2cr", True, YELLOW), (x, y))
+                    self.screen.blit(self.font.render(f"Spawn: 0.2/s (2cr)", True, YELLOW), (x, y))
                     y += 20
                 
                 if building.can_upgrade():
@@ -879,6 +980,11 @@ class Game:
         title = self.font_large.render("Build Menu", True, WHITE)
         self.screen.blit(title, (menu_x + 20, menu_y + 20))
         
+        # Footer
+        footer = pygame.font.Font(None, 24).render("ESC = CANCEL/BACK", True, GRAY)
+        footer_rect = footer.get_rect(right=menu_x + menu_width - 20, top=menu_y + 25)
+        self.screen.blit(footer, footer_rect)
+        
         # Building options
         y_offset = menu_y + 70
         for i, building_type in enumerate([
@@ -892,6 +998,9 @@ class Game:
             template = get_building_template(building_type, 1)
             text = f"[{i}] {building_type.value.replace('_', ' ').title()} - ${template.cost}"
             
+            # Category Tag
+            cat_text = f"[{template.category.value}]"
+            
             # Stats string
             stats = []
             stats.append(f"HP: {template.max_hp}")
@@ -900,8 +1009,8 @@ class Game:
             if template.shield_hp_bonus > 0: stats.append(f"Shield: +{template.shield_hp_bonus}")
             if template.shield_recharge_bonus > 0: stats.append(f"Rchrg: +{template.shield_recharge_bonus:.1f}")
             if building_type == BuildingType.TURRET: stats.append(f"Dmg: {template.damage}")
-            if building_type == BuildingType.BARRACKS: stats.append("Spawns Defenders (1cr)")
-            if building_type == BuildingType.DRONE_FACTORY: stats.append(f"Cap: {template.capacity} Drones (2cr)")
+            if building_type == BuildingType.BARRACKS: stats.append("Spawns Defenders (1cr, 0.1/s)")
+            if building_type == BuildingType.DRONE_FACTORY: stats.append(f"Cap: {template.capacity} Drones (2cr, 0.2/s)")
             
             stats_text = " | ".join(stats)
             
@@ -910,9 +1019,32 @@ class Game:
             # Check if placeable at current cursor
             can_place, reason = self.state.grid.can_place(building_type, self.state.selected_column, self.state.selected_row)
             
+            # Highlight selected item
+            is_selected = (i - 1) == self.build_menu_selection
+            
+            if is_selected:
+                # Draw selection box
+                pygame.draw.rect(self.screen, (50, 50, 70), (menu_x + 10, y_offset - 5, menu_width - 20, 45))
+                pygame.draw.rect(self.screen, YELLOW, (menu_x + 10, y_offset - 5, menu_width - 20, 45), 2)
+            
             color = WHITE if affordable and can_place else GRAY
+            if is_selected and not (affordable and can_place):
+                color = RED # Highlight issue if selected
+            
             surf = self.font.render(text, True, color)
             self.screen.blit(surf, (menu_x + 20, y_offset))
+            
+            # Draw Category
+            cat_color = GRAY
+            if template.category == BuildingCategory.PRODUCTION: cat_color = BLUE
+            elif template.category == BuildingCategory.DEFENSE: cat_color = RED
+            elif template.category == BuildingCategory.MILITARY: cat_color = (139, 69, 19)
+            elif template.category == BuildingCategory.UTILITY: cat_color = (0, 255, 255)
+            
+            cat_surf = pygame.font.Font(None, 20).render(cat_text, True, cat_color)
+            # Align right
+            cat_rect = cat_surf.get_rect(right=menu_x + menu_width - 20, centery=y_offset + 10)
+            self.screen.blit(cat_surf, cat_rect)
             
             # Draw stats below
             stats_surf = pygame.font.Font(None, 20).render(stats_text, True, (200, 200, 200))
@@ -1023,6 +1155,17 @@ class Game:
             # Let's just draw it.
             
             self.draw_single_building(moving_building, x, y, 180, ghost=True)
+
+        # Draw ghost of pending build
+        if self.confirm_build_type:
+             template = get_building_template(self.confirm_build_type, 1)
+             x = GRID_START_X + self.state.selected_column * GRID_SLOT_WIDTH
+             height_px = template.footprint[1] * GRID_CELL_HEIGHT
+             y = GROUND_Y - (self.state.selected_row * GRID_CELL_HEIGHT) - height_px
+             
+             # Create dummy building for drawing
+             dummy = Building(id=-1, template=template, current_hp=template.max_hp, column=self.state.selected_column, row=self.state.selected_row)
+             self.draw_single_building(dummy, x, y, 180, ghost=True)
 
     def draw_single_building(self, building, x, y, alpha, ghost=False):
         # Color based on type
@@ -1229,6 +1372,118 @@ class Game:
             retry_rect = retry.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 80))
             self.screen.blit(retry, retry_rect)
     
+    def draw_help_menu(self):
+        """Draw Help Screen Overlay"""
+        # Dimensions
+        width = 1000  # Widened to fit text
+        height = 600
+        x = (SCREEN_WIDTH - width) // 2
+        y = (SCREEN_HEIGHT - height) // 2
+        
+        # Background
+        pygame.draw.rect(self.screen, (20, 20, 30), (x, y, width, height))
+        pygame.draw.rect(self.screen, WHITE, (x, y, width, height), 2)
+        
+        # Title
+        title = self.font_title.render("FIELD MANUAL", True, GREEN)
+        title_rect = title.get_rect(center=(x + width//2, y + 50))
+        self.screen.blit(title, title_rect)
+        
+        # Columns
+        col1_x = x + 40
+        col2_x = x + width // 2 + 40  # Shifted right
+        current_y = y + 100
+        
+        # --- Column 1: Controls & Basics ---
+        self.screen.blit(self.font_large.render("CONTROLS", True, YELLOW), (col1_x, current_y))
+        current_y += 40
+        
+        controls = [
+            ("Arrow Keys", "Move Cursor"),
+            ("Space", "Open Build Menu / Confirm"),
+            ("1-6", "Quick Build Hotkeys"),
+            ("U", "Upgrade Building"),
+            ("R", "Repair Building"),
+            ("Del/Backspace", "Sell Building"),
+            ("W", "Start Next Wave"),
+            ("H", "Toggle This Help Screen"),
+            ("Esc", "Cancel / Pause")
+        ]
+        
+        for key, desc in controls:
+            key_surf = self.font.render(key, True, WHITE)
+            desc_surf = self.font.render(desc, True, GRAY)
+            self.screen.blit(key_surf, (col1_x, current_y))
+            self.screen.blit(desc_surf, (col1_x + 160, current_y))
+            current_y += 25
+            
+        current_y += 20
+        self.screen.blit(self.font_large.render("GAMEPLAY TIPS", True, YELLOW), (col1_x, current_y))
+        current_y += 40
+        
+        tips = [
+            "- Energy Management is crucial. Negative energy drains credits.",
+            "- Shields require energy to recharge.",
+            "- Unlock new columns to expand your base.",
+            "- Foundations are required for upper levels.",
+            "- Datacenters boost Shield HP but consume energy.",
+            "- Capacitors boost Shield Recharge rate."
+        ]
+        
+        for tip in tips:
+            tip_surf = pygame.font.Font(None, 22).render(tip, True, WHITE)
+            self.screen.blit(tip_surf, (col1_x, current_y))
+            current_y += 25
+
+        # --- Column 2: Building Categories ---
+        current_y = y + 100
+        self.screen.blit(self.font_large.render("BUILDING TYPES", True, YELLOW), (col2_x, current_y))
+        current_y += 40
+        
+        categories = [
+            (BuildingCategory.PRODUCTION, "Power Plants", "Generates Energy. Essential for base operation."),
+            (BuildingCategory.UTILITY, "Datacenters, Capacitors", "Enhances Shield systems."),
+            (BuildingCategory.DEFENSE, "Turrets, Drone Factories", "Active defense against aerial threats."),
+            (BuildingCategory.MILITARY, "Barracks", "Spawns Defenders to fight ground invaders.")
+        ]
+        
+        for cat, name, desc in categories:
+            cat_surf = self.font.render(f"[{cat.value.upper()}] {name}", True, GREEN)
+            self.screen.blit(cat_surf, (col2_x, current_y))
+            current_y += 25
+            
+            desc_surf = pygame.font.Font(None, 20).render(desc, True, GRAY)
+            self.screen.blit(desc_surf, (col2_x, current_y))
+            current_y += 35
+            
+        current_y += 10
+        self.screen.blit(self.font_large.render("SPECIAL MECHANICS", True, YELLOW), (col2_x, current_y))
+        current_y += 40
+        
+        mechanics = [
+            ("BARRACKS", "Must be placed on Ground or other Barracks.", "Produces Defenders automatically."),
+            ("DRONE FACTORY", "2-Wide Building. Launches interceptors.", "Requires 2 Credits per Drone."),
+            ("STACKING", "Turrets can be placed on top of Barracks.", "Maximize space efficiency!")
+        ]
+        
+        for title, rule, effect in mechanics:
+            t_surf = self.font.render(title, True, WHITE)
+            self.screen.blit(t_surf, (col2_x, current_y))
+            current_y += 20
+            
+            r_surf = pygame.font.Font(None, 20).render(f"Rule: {rule}", True, (255, 200, 200))
+            self.screen.blit(r_surf, (col2_x, current_y))
+            current_y += 18
+            
+            e_surf = pygame.font.Font(None, 20).render(f"Effect: {effect}", True, (200, 255, 200))
+            self.screen.blit(e_surf, (col2_x, current_y))
+            current_y += 30
+
+        # Footer
+        footer = self.font.render("Press H or ESC to Close", True, WHITE)
+        footer_rect = footer.get_rect(center=(x + width//2, y + height - 30))
+        self.screen.blit(footer, footer_rect)
+
     def run(self):
         while self.running:
             dt = self.clock.tick(FPS) / 1000.0  # Delta time in seconds

@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.22] - 2025-11-26
+
+### Added
+- **UI/UX**:
+  - **Field Manual**: Added a comprehensive Help Screen (accessible via 'H' or Main Menu) detailing controls, building types, and game mechanics.
+  - **Build Menu Improvements**:
+    - **Cursor Locking**: The grid cursor is now locked when the Build Menu is open.
+    - **Navigation**: Added Arrow Key navigation to the Build Menu list.
+    - **Confirmation**: Added a "Build Confirmation" step (Ghost building preview, Space to confirm, Esc to cancel) to prevent accidental placement.
+    - **Footer**: Added "ESC = CANCEL/BACK" hint to the Build Menu.
+  - **Spawn Rates**: Added spawn frequency info (e.g., "Spawn: 0.1/s") to the HUD and Build Menu for Barracks and Drone Factories.
+  - **Building Categories**: Introduced and displayed categories (Production, Utility, Defense, Military) for all buildings.
+
+### Fixed
+- **Building Logic**:
+  - **Placement Overlap**: Fixed a bug where 2-wide buildings (like Drone Factories) could be placed on invalid foundations (e.g., partially overlapping a Barracks) by enforcing a full-width check during placement.
+
 ## [0.2.21] - 2025-11-25
 
 ### Added

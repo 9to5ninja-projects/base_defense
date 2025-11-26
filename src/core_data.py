@@ -12,9 +12,16 @@ class BuildingType(Enum):
     DRONE_FACTORY = "drone_factory"
     BARRACKS = "barracks"
 
+class BuildingCategory(Enum):
+    PRODUCTION = "Production"
+    UTILITY = "Utility"
+    DEFENSE = "Defense"
+    MILITARY = "Military"
+
 @dataclass
 class BuildingTemplate:
     type: BuildingType
+    category: BuildingCategory
     level: int
     max_hp: int
     energy_production: int
@@ -197,6 +204,7 @@ def get_building_template(building_type: BuildingType, level: int) -> BuildingTe
             
             return BuildingTemplate(
                 type=building_type,
+                category=BuildingCategory.DEFENSE,
                 level=level,
                 max_hp=int(base['max_hp'] * scale),
                 energy_production=0,
@@ -223,6 +231,7 @@ def get_building_template(building_type: BuildingType, level: int) -> BuildingTe
             
             return BuildingTemplate(
                 type=building_type,
+                category=BuildingCategory.DEFENSE,
                 level=level,
                 max_hp=int(base['max_hp'] * scale),
                 energy_production=0,
@@ -241,8 +250,20 @@ def get_building_template(building_type: BuildingType, level: int) -> BuildingTe
 
         calc_ammo_range = int(calc_range * 1.5)
 
+    # Determine Category
+    category = BuildingCategory.UTILITY
+    if building_type == BuildingType.POWER_PLANT:
+        category = BuildingCategory.PRODUCTION
+    elif building_type == BuildingType.TURRET:
+        category = BuildingCategory.DEFENSE
+    elif building_type == BuildingType.DRONE_FACTORY:
+        category = BuildingCategory.DEFENSE
+    elif building_type == BuildingType.BARRACKS:
+        category = BuildingCategory.MILITARY
+
     return BuildingTemplate(
         type=building_type,
+        category=category,
         level=level,
         max_hp=int(base['max_hp'] * scale),
         energy_production=int(base['energy_production'] * scale),
@@ -454,11 +475,13 @@ class CityGrid:
         
         # Special rule: Stacking ON TOP of Barracks
         if row > 0:
-            below_building = self.get_building_at(column, row - 1)
-            if below_building and below_building.template.type == BuildingType.BARRACKS:
-                # Only defensive (Turret) or Barracks allowed
-                if building_type not in [BuildingType.TURRET, BuildingType.BARRACKS]:
-                    return False, "Only Defensive buildings allowed on Barracks"
+            # Check ALL cells below the new building
+            for dx in range(width):
+                below_building = self.get_building_at(column + dx, row - 1)
+                if below_building and below_building.template.type == BuildingType.BARRACKS:
+                    # Only defensive (Turret) or Barracks allowed
+                    if building_type not in [BuildingType.TURRET, BuildingType.BARRACKS]:
+                        return False, "Only Defensive buildings allowed on Barracks"
 
         return True, "OK"
     
