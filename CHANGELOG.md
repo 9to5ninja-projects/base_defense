@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.21] - 2025-11-25
+
+### Added
+- **Drones**:
+  - **Smart Avoidance**: Drones now actively avoid colliding with enemies to prevent clipping. They will repel if they get too close (< 30px).
+  - **Generation Cost**: Drones now cost **2 Credits** to launch.
+  - **Activity Logs**: Added game log messages for Drone launches and combat activity.
+- **UI/UX**:
+  - **Drone Factory Info**: The HUD now displays the **Global Drone Cap** (e.g., "Cap: 2/10") and **Generation Cost** when a Drone Factory is selected.
+  - **Barracks Info**: The HUD now displays the **Generation Cost** (1cr) when a Barracks is selected.
+  - **Build Menu**: Added "Gen Cost" info to the descriptions for Drone Factories and Barracks.
+  - **Combat Status**: The "Defenders" and "Drones" counts in the Combat Status panel now show current vs max capacity (e.g., "Defenders: 5/12").
+
+### Changed
+- **QOL**:
+  - **Shield Refill**: Shields now automatically refill to 100% and reactivate at the start of every wave.
+
 ## [0.2.20] - 2025-11-25
 
 ### Added

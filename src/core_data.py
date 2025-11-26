@@ -675,6 +675,11 @@ class CombatManager:
         self.ground_units.clear()
         self.drones.clear()
         
+        # Refill Shield
+        self.state.shield_current_hp = self.state.shield_max_hp
+        self.state.shield_is_active = True
+        self.state.add_log("Shields Recharged.")
+        
     def spawn_boss(self):
         """Spawn the Giant Kamikaze Boss"""
         # Center spawn
@@ -1080,6 +1085,11 @@ class CombatManager:
                     spawn_interval = 5.0 # Fast production
                     
                     if building.spawn_timer >= spawn_interval:
+                        # Check cost
+                        cost = 2 # Base cost
+                        if self.state.credits < cost:
+                            continue
+
                         # Spawn Drone
                         width, height = building.template.footprint
                         bx = GRID_START_X + building.column * GRID_SLOT_WIDTH + (width * GRID_SLOT_WIDTH / 2)
@@ -1101,6 +1111,8 @@ class CombatManager:
                         self.drones.append(drone)
                         current_drones += 1
                         building.spawn_timer = 0
+                        self.state.credits -= cost
+                        self.state.add_log("Drone launched!")
         
         # 2. Behavior
         for drone in self.drones:
@@ -1126,7 +1138,12 @@ class CombatManager:
                 dist = (dx**2 + dy**2)**0.5
                 
                 if dist > 0:
-                    if dist > ideal_dist:
+                    # Smart Avoidance: Check for collision with target
+                    if dist < (drone.target.radius + 30): # Too close!
+                        # Evasive maneuver - fly away fast
+                        drone.vx = -(dx / dist) * drone.speed * 1.5
+                        drone.vy = -(dy / dist) * drone.speed * 1.5
+                    elif dist > ideal_dist:
                         # Close in
                         drone.vx = (dx / dist) * drone.speed
                         drone.vy = (dy / dist) * drone.speed
@@ -1144,7 +1161,8 @@ class CombatManager:
                         self.fire_projectile(drone.x, drone.y, drone.target, 
                                            damage=drone.damage, 
                                            max_range=drone.range * 1.5,
-                                           speed=400) # Fast drone shots
+                                           speed=400,
+                                           source="drone") # Fast drone shots
                         drone.cooldown = 0.8
             else:
                 # Return home
@@ -1243,7 +1261,7 @@ class CombatManager:
         
         return nearest
     
-    def fire_projectile(self, from_x, from_y, target, damage=25, max_range=0, speed=300):
+    def fire_projectile(self, from_x, from_y, target, damage=25, max_range=0, speed=300, source="turret"):
         """Create projectile aimed at target"""
         dx = target.x - from_x
         dy = target.y - from_y
@@ -1263,7 +1281,8 @@ class CombatManager:
             vy=vy,
             damage=damage,
             target=target,
-            max_range=max_range
+            max_range=max_range,
+            source=source
         )
         self.projectiles.append(projectile)
     
@@ -1287,7 +1306,7 @@ class CombatManager:
         """Handle all collision detection"""
         # Projectiles vs enemies
         for proj in self.projectiles:
-            if not proj.alive or proj.source != "turret":
+            if not proj.alive or (proj.source != "turret" and proj.source != "drone"):
                 continue
                 
             for enemy in self.enemies:
@@ -1299,6 +1318,10 @@ class CombatManager:
                     enemy.current_hp -= proj.damage
                     proj.alive = False
                     
+                    if proj.source == "drone":
+                        # Log drone hits
+                        self.state.add_log(f"Drone hit target! -{proj.damage}")
+
                     if enemy.current_hp <= 0:
                         enemy.alive = False
                         self.state.credits += 10

@@ -732,13 +732,17 @@ class Game:
             defenders = sum(1 for u in self.state.combat.ground_units if u.team == "defender" and u.alive)
             drones = len(self.state.combat.drones)
             
+            # Calculate capacities
+            drone_cap = sum(b.template.capacity for b in self.state.grid.buildings if b.template.type == BuildingType.DRONE_FACTORY)
+            barracks_cap = sum(b.template.capacity for b in self.state.grid.buildings if b.template.type == BuildingType.BARRACKS)
+            
             self.screen.blit(self.font.render(f"Aerial Enemies: {len(self.state.combat.enemies)}", True, WHITE), (x, y))
             y += 20
             self.screen.blit(self.font.render(f"Ground Invaders: {invaders}", True, RED), (x, y))
             y += 20
-            self.screen.blit(self.font.render(f"Defenders: {defenders}", True, BLUE), (x, y))
+            self.screen.blit(self.font.render(f"Defenders: {defenders}/{barracks_cap}", True, BLUE), (x, y))
             y += 20
-            self.screen.blit(self.font.render(f"Drones: {drones}", True, (0, 255, 255)), (x, y))
+            self.screen.blit(self.font.render(f"Drones: {drones}/{drone_cap}", True, (0, 255, 255)), (x, y))
             y += 20
             self.screen.blit(self.font.render(f"Incoming: {self.state.combat.current_wave.enemies_remaining}", True, WHITE), (x, y))
             y += 20
@@ -799,6 +803,16 @@ class Game:
                     y += 20
                 elif building.template.type == BuildingType.BARRACKS:
                     self.screen.blit(self.font.render(f"Cap: {building.template.capacity} Defenders", True, BLUE), (x, y))
+                    y += 20
+                    self.screen.blit(self.font.render(f"Gen Cost: 1cr", True, YELLOW), (x, y))
+                    y += 20
+                elif building.template.type == BuildingType.DRONE_FACTORY:
+                    # Calculate global capacity for context
+                    drone_cap = sum(b.template.capacity for b in self.state.grid.buildings if b.template.type == BuildingType.DRONE_FACTORY)
+                    current_drones = len(self.state.combat.drones) if self.state.combat else 0
+                    self.screen.blit(self.font.render(f"Global Cap: {current_drones}/{drone_cap}", True, (0, 255, 255)), (x, y))
+                    y += 20
+                    self.screen.blit(self.font.render(f"Gen Cost: 2cr", True, YELLOW), (x, y))
                     y += 20
                 
                 if building.can_upgrade():
@@ -886,8 +900,8 @@ class Game:
             if template.shield_hp_bonus > 0: stats.append(f"Shield: +{template.shield_hp_bonus}")
             if template.shield_recharge_bonus > 0: stats.append(f"Rchrg: +{template.shield_recharge_bonus:.1f}")
             if building_type == BuildingType.TURRET: stats.append(f"Dmg: {template.damage}")
-            if building_type == BuildingType.BARRACKS: stats.append("Spawns Defenders")
-            if building_type == BuildingType.DRONE_FACTORY: stats.append(f"Cap: {template.capacity} Drones")
+            if building_type == BuildingType.BARRACKS: stats.append("Spawns Defenders (1cr)")
+            if building_type == BuildingType.DRONE_FACTORY: stats.append(f"Cap: {template.capacity} Drones (2cr)")
             
             stats_text = " | ".join(stats)
             

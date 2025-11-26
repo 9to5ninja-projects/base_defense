@@ -21,10 +21,10 @@
     - [x] **Retry Wave**: Added ability to retry the current wave.
 
 ## Phase 4: New Units & Mechanics
-- [ ] **Drones**:
-    - [ ] **Drone Factory**: New building with capacity/generation logic.
-    - [ ] **Drone Unit**: Flying defender that moves within range X of nearest enemy.
-    - [ ] **Stats**: Deals ~50% of basic turret damage.
+- [x] **Drones**:
+    - [x] **Drone Factory**: New building with capacity/generation logic.
+    - [x] **Drone Unit**: Flying defender that moves within range X of nearest enemy.
+    - [x] **Stats**: Deals ~50% of basic turret damage.
 - [ ] **Turret Branching**:
     - [ ] **Basic Tier Progression**: Establish distinct stats for Basic Turret Tiers 1-3.
     - [ ] Implement branching paths at Tier II:
