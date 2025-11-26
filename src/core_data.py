@@ -1334,16 +1334,24 @@ class CombatManager:
                 continue
                 
             # Only check collision if shield is active
-            if self.state.shield_is_active and enemy.y >= SHIELD_Y and enemy.y <= SHIELD_Y + 10:
-                if self.state.shield_current_hp > 0:
-                    self.state.shield_current_hp -= enemy.damage
-                    self.state.add_log(f"Shield hit! -{enemy.damage} HP")
-                    enemy.alive = False
-                    
-                    if self.state.shield_current_hp <= 0:
-                        self.state.shield_current_hp = 0
-                        self.state.shield_is_active = False
-                        self.state.add_log("SHIELD COLLAPSED! REBOOTING...")
+            if self.state.shield_is_active:
+                # Calculate shield thickness to match rendering (max 50px)
+                thickness = max(2, min(50, int(self.state.shield_current_hp / 5)))
+                shield_top = SHIELD_Y - (thickness / 2)
+                shield_bottom = SHIELD_Y + (thickness / 2)
+                
+                # Check collision with shield volume (Circle vs Horizontal Rect)
+                # Since shield spans entire width, we only care about Y overlap
+                if (enemy.y + enemy.radius) >= shield_top and (enemy.y - enemy.radius) <= shield_bottom:
+                    if self.state.shield_current_hp > 0:
+                        self.state.shield_current_hp -= enemy.damage
+                        self.state.add_log(f"Shield hit! -{enemy.damage} HP")
+                        enemy.alive = False
+                        
+                        if self.state.shield_current_hp <= 0:
+                            self.state.shield_current_hp = 0
+                            self.state.shield_is_active = False
+                            self.state.add_log("SHIELD COLLAPSED! REBOOTING...")
         
         # Enemies vs buildings
         for enemy in self.enemies:
